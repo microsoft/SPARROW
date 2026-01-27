@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-#  SPARROW Setup Script           18-November-2025
+#  SPARROW Setup Script           27-January-2026
 ###############################################################################
 set -euo pipefail
 
@@ -89,6 +89,10 @@ ONBOARDING_URL="https://server.sparrow-earth.com/onboarding"
 
 USERNAME=""
 
+# ENV / FTP
+ENV_FILE=""
+FTP_PASS=""
+
 ###############################################################################
 # 2.  -- UTILITY FUNCTIONS --
 ###############################################################################
@@ -138,7 +142,6 @@ get_hardware_id() {
     log "Generated Hardware ID for onboarding: $hwid" >/dev/null
     echo "$hwid"
 }
-
 
 install_curl()  { command_exists curl  || { apt-get update -y; apt-get install -y curl;  } }
 install_wget()  { command_exists wget  || { apt-get update -y; apt-get install -y wget;  } }
@@ -439,6 +442,75 @@ install_smbus2() {
 }
 
 ###############################################################################
+# 2b. -- FTP_PASS PROMPT + .env UPDATE --
+###############################################################################
+prompt_ftp_pass() {
+    local p1 p2
+    while true; do
+        p1=$(_input "Enter FTP password (FTP_PASS)" hide)
+        p2=$(_input "Re-enter FTP password" hide)
+
+        if [[ -z "${p1:-}" || -z "${p2:-}" ]]; then
+            _error "FTP password cannot be empty."
+            continue
+        fi
+        if [[ "$p1" != "$p2" ]]; then
+            _error "Passwords do not match. Please try again."
+            continue
+        fi
+        FTP_PASS="$p1"
+        break
+    done
+}
+
+set_dotenv_kv() {
+    local file="$1" key="$2" val="$3"
+    mkdir -p "$(dirname "$file")"
+    [[ -f "$file" ]] || touch "$file"
+
+    # escape for sed replacement
+    local esc
+    esc=$(printf '%s' "$val" | sed -e 's/[\/&]/\\&/g')
+
+    if grep -qE "^${key}=" "$file"; then
+        sed -i "s/^${key}=.*/${key}=${esc}/" "$file"
+    else
+        printf '\n%s=%s\n' "$key" "$val" >>"$file"
+    fi
+}
+
+find_env_file() {
+    # Prefer standard docker-compose dotenv naming in the compose root
+    if [[ -f "$SYSTEM_FOLDER/.env" ]]; then
+        echo "$SYSTEM_FOLDER/.env"; return 0
+    fi
+
+    # Common alternative naming
+    if [[ -f "$SYSTEM_FOLDER/sparrow.env" ]]; then
+        echo "$SYSTEM_FOLDER/sparrow.env"; return 0
+    fi
+
+    # Heuristic: any *.env in root containing at least one known key
+    local f
+    for f in "$SYSTEM_FOLDER"/*.env "$SYSTEM_FOLDER"/*env; do
+        [[ -f "$f" ]] || continue
+        if grep -qE '^(TRITON_SERVER_URL|SERVER_BASE_URL|LOCAL_MODELS_DIR|FTP_USER|FTP_PASS)=' "$f"; then
+            echo "$f"; return 0
+        fi
+    done
+
+    return 1
+}
+
+configure_ftp_pass_in_env() {
+    ENV_FILE="$SYSTEM_FOLDER/sparrow.env"
+    [[ -f "$ENV_FILE" ]] || { _error "Env file not found: $ENV_FILE"; return 1; }
+    set_dotenv_kv "$ENV_FILE" "FTP_PASS" "$FTP_PASS"
+    log "Set FTP_PASS in env file: $ENV_FILE"
+}
+
+
+###############################################################################
 # 3.  -- DS3231 RTC SEED --
 ###############################################################################
 seed_ds3231() {
@@ -636,7 +708,6 @@ onboard_device() {
     return 1
 }
 
-
 ###############################################################################
 # 4.  -- MAIN SCRIPT LOGIC --
 ###############################################################################
@@ -666,6 +737,10 @@ else _progress "Installing Docker-Compose..." install_docker_compose; fi
 # prompt for hotspot password before configuring Wi-Fi AP
 prompt_hotspot_password
 setup_persistent_wifi_hotspot
+
+# prompt for FTP_PASS and write it into the env file before containers run
+prompt_ftp_pass
+configure_ftp_pass_in_env
 
 install_smbus2
 seed_ds3231
