@@ -10,7 +10,7 @@ filelock==3.20.3
 smbus2==0.4.1
 pyserial==3.5
 tqdm==4.66.5
-Pillow==10.4.0
+Pillow==12.1.1
 numpy==1.26.4
 pandas==1.4.4
 torch==2.8.0
