@@ -1,0 +1,32 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# System deps:
+RUN apt-get update && apt-get install -y \
+    supervisor \
+    libgpiod3 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /tmp/requirements.txt
+
+# Handle arch-specific grpc wheels
+RUN set -eux; \
+    ARCH="$(uname -m)"; \
+    if [ "$ARCH" = "armv7l" ]; then \
+        NOBIN_OPT="--no-binary=grpcio"; \
+    else \
+        NOBIN_OPT=""; \
+    fi; \
+    pip install --no-cache-dir $NOBIN_OPT -r /tmp/requirements.txt; \
+    \
+    # Only install Jetson.GPIO when actually on a Jetson rootfs
+    if [ -e /etc/nv_tegra_release ]; then \
+        pip install --no-cache-dir Jetson.GPIO; \
+    fi
+
+COPY starlink_sleep_schedule.py /app/
+COPY starlink_metrics_logger.py /app/
+COPY supervisord.conf /etc/supervisor/supervisord.conf
+
+CMD ["supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]

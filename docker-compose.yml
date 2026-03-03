@@ -1,0 +1,44 @@
+version: "3.8"
+
+services:
+  sparrow:
+    build:
+      context: ./sparrow
+    container_name: sparrow_service
+    env_file:
+      - ./sparrow.env
+    network_mode: host
+    volumes:
+      - ./sparrow/config:/app/config
+      - ./sparrow/images:/app/images
+      - ./sparrow/static:/app/static
+      - ./sparrow/recordings:/app/recordings
+      - ./sparrow/logs:/app/logs
+      - /sys:/host/sys:ro
+      - /proc:/host/proc:ro
+      - /etc/unique_id:/host/etc/unique_id:ro
+      - ./Models/tritonserver/model_repository:/home/sparrow/Desktop/system/Models/tritonserver/model_repository
+    privileged: true
+    restart: unless-stopped
+
+  starlink-tools:
+    build:
+      context: ./starlink
+      dockerfile: Dockerfile.starlink
+    container_name: starlink_tools_container
+    env_file:
+      - ./starlink.env
+    networks:
+      - sparrow_network
+    volumes:
+      - ./starlink/config:/app/config
+      - ./starlink/logs:/app/logs
+      - /sys:/host/sys:ro
+      - /proc:/host/proc:ro
+      - /etc/unique_id:/host/etc/unique_id:ro
+    privileged: true
+    restart: unless-stopped
+
+networks:
+  sparrow_network:
+    driver: bridge

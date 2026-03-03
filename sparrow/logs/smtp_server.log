@@ -1,0 +1,42 @@
+2026-02-06 12:38:26,593 INFO Available AUTH mechanisms: LOGIN(builtin) PLAIN(builtin)
+2026-02-06 12:38:26,595 INFO Peer: ('127.0.0.1', 39796)
+2026-02-06 12:38:26,596 INFO ('127.0.0.1', 39796) handling connection
+2026-02-06 12:38:26,597 INFO SMTP server is running on port 25...
+2026-02-06 12:38:26,597 INFO ('127.0.0.1', 39796) EOF received
+2026-02-06 12:38:26,598 INFO ('127.0.0.1', 39796) Connection lost during _handle_client()
+2026-02-06 12:38:26,598 INFO ('127.0.0.1', 39796) connection lost
+2026-02-06 17:00:34,290 INFO Available AUTH mechanisms: LOGIN(builtin) PLAIN(builtin)
+2026-02-06 17:00:34,293 INFO Peer: ('127.0.0.1', 43762)
+2026-02-06 17:00:34,293 INFO ('127.0.0.1', 43762) handling connection
+2026-02-06 17:00:34,293 INFO SMTP server is running on port 25...
+2026-02-06 17:00:34,294 INFO ('127.0.0.1', 43762) EOF received
+2026-02-06 17:00:34,295 INFO ('127.0.0.1', 43762) Connection lost during _handle_client()
+2026-02-06 17:00:34,295 INFO ('127.0.0.1', 43762) connection lost
+2026-02-06 17:15:15,346 INFO Available AUTH mechanisms: LOGIN(builtin) PLAIN(builtin)
+2026-02-06 17:15:15,347 INFO Peer: ('127.0.0.1', 57068)
+2026-02-06 17:15:15,347 INFO ('127.0.0.1', 57068) handling connection
+2026-02-06 17:15:15,348 INFO ('127.0.0.1', 57068) EOF received
+2026-02-06 17:15:15,348 INFO SMTP server is running on port 25...
+2026-02-06 17:15:15,348 INFO ('127.0.0.1', 57068) Connection lost during _handle_client()
+2026-02-06 17:15:15,348 INFO ('127.0.0.1', 57068) connection lost
+2026-02-08 11:23:39,393 INFO Available AUTH mechanisms: LOGIN(builtin) PLAIN(builtin)
+2026-02-08 11:23:39,394 INFO Peer: ('127.0.0.1', 52756)
+2026-02-08 11:23:39,394 INFO ('127.0.0.1', 52756) handling connection
+2026-02-08 11:23:39,395 INFO SMTP server is running on port 25...
+2026-02-08 11:23:39,398 INFO ('127.0.0.1', 52756) EOF received
+2026-02-08 11:23:39,398 INFO ('127.0.0.1', 52756) Connection lost during _handle_client()
+2026-02-08 11:23:39,398 INFO ('127.0.0.1', 52756) connection lost
+2026-02-09 11:41:11,255 INFO Available AUTH mechanisms: LOGIN(builtin) PLAIN(builtin)
+2026-02-09 11:41:11,257 INFO Peer: ('127.0.0.1', 54052)
+2026-02-09 11:41:11,257 INFO ('127.0.0.1', 54052) handling connection
+2026-02-09 11:41:11,259 INFO SMTP server is running on port 25...
+2026-02-09 11:41:11,259 INFO ('127.0.0.1', 54052) EOF received
+2026-02-09 11:41:11,259 INFO ('127.0.0.1', 54052) Connection lost during _handle_client()
+2026-02-09 11:41:11,259 INFO ('127.0.0.1', 54052) connection lost
+2026-02-09 12:13:26,481 INFO Available AUTH mechanisms: LOGIN(builtin) PLAIN(builtin)
+2026-02-09 12:13:26,483 INFO Peer: ('127.0.0.1', 53220)
+2026-02-09 12:13:26,484 INFO ('127.0.0.1', 53220) handling connection
+2026-02-09 12:13:26,484 INFO ('127.0.0.1', 53220) EOF received
+2026-02-09 12:13:26,484 INFO SMTP server is running on port 25...
+2026-02-09 12:13:26,487 INFO ('127.0.0.1', 53220) Connection lost during _handle_client()
+2026-02-09 12:13:26,488 INFO ('127.0.0.1', 53220) connection lost
