@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 ###############################################################################
-#  SPARROW Setup Script (Raspberry Pi 5 / Debian Trixie)    03-March-2026
-#  - Keeps Triton model repository layout exactly as before
-#  - Uses Debian Docker packages + Compose v2 plugin (docker compose)
+#  SPARROW Setup Script (Raspberry Pi 5 / Debian Trixie)
+#  - Uses Docker's official Debian repo for Docker Engine + Compose plugin
 #  - Enables I2C (+ optional DS3231 overlay) via boot config
-#  - Removes TeamViewer install
+#  - Installs Witty Pi 5 software and configures auto power-on on power restore
+#  - Clones a private GitHub repo using a prompted fine-grained PAT
+#  - Keeps model/version folder structure, without Triton config.pbtxt files
+#  - Shows command output in terminal and logs to /var/log/sparrow_setup.log
 ###############################################################################
 set -euo pipefail
+export GTK_A11Y=none
 
 ###############################################################################
 # 0.  -- GUI HELPERS --
@@ -22,24 +25,28 @@ _install_zenity() {
     fi
 }
 
-_yesno() {               # returns 0 (true) for Yes / OK
+_yesno() {
     if $GUI && command -v zenity >/dev/null 2>&1; then
         zenity --question --no-wrap --text="$1" --width=440
     else
-        read -rp "$1 (y/n): " _ans; [[ "${_ans,,}" =~ ^y(es)?$ ]]
+        read -rp "$1 (y/n): " _ans
+        [[ "${_ans,,}" =~ ^y(es)?$ ]]
     fi
 }
 
-_input() {               # $1 prompt , $2 = "hide" to mask
+_input() {
     if $GUI && command -v zenity >/dev/null 2>&1; then
         local opts=(--entry --text="$1" --width=460)
         [[ "${2:-}" == "hide" ]] && opts+=(--hide-text)
         zenity "${opts[@]}"
     else
         if [[ "${2:-}" == "hide" ]]; then
-            read -rsp "$1: " _txt; echo; echo "$_txt"
+            read -rsp "$1: " _txt
+            echo
+            echo "$_txt"
         else
-            read -rp "$1: " _txt; echo "$_txt"
+            read -rp "$1: " _txt
+            echo "$_txt"
         fi
     fi
 }
@@ -47,12 +54,17 @@ _input() {               # $1 prompt , $2 = "hide" to mask
 _info()  { $GUI && command -v zenity >/dev/null 2>&1 && zenity --info  --no-wrap --text="$*" --width=480 || echo -e "$*"; }
 _error() { $GUI && command -v zenity >/dev/null 2>&1 && zenity --error --no-wrap --text="$*" --width=480 || { echo -e "ERROR: $*" >&2; } }
 
-_progress() {            # $1 = message, $2… = command
+_progress() {
+    local msg="$1"
+    shift
+
     if $GUI && command -v zenity >/dev/null 2>&1; then
-        ( "${@:2}" ) 2>&1 | zenity --progress --pulsate --no-cancel \
-                                    --auto-close --text="$1" --width=480
+        (
+            echo "$msg"
+            "$@" 2>&1 | tee /dev/tty
+        ) | zenity --progress --pulsate --no-cancel --auto-close --text="$msg" --width=480
     else
-        "${@:2}"
+        "$@"
     fi
 }
 
@@ -63,7 +75,7 @@ LOG_FILE="/var/log/sparrow_setup.log"
 UUID_FILE="/etc/unique_id"
 
 HOTSPOT_SSID="CameraTraps"
-HOTSPOT_PASSWORD=""        # set interactively via prompt_hotspot_password
+HOTSPOT_PASSWORD=""
 WIFI_INTERFACE="wlan0"
 
 MODEL_DOWNLOAD_URL="https://zenodo.org/record/14661733/files/MDV6b-yolov9c.onnx?download=1"
@@ -81,19 +93,22 @@ AUDIO_BIRDS_MODEL_DIR_NAME="1"
 AUDIO_BIRDS_MODEL_FILENAME_TEMP="MD_AudioBirds_V1.onnx"
 AUDIO_BIRDS_MODEL_FILENAME_FINAL="model.onnx"
 
-REPO_URL="https://github.com/microsoft/sparrow-client"
+REPO_URL="https://github.com/Clamps251/sparrow-pi.git"
 CLONE_DIR=""
+GITHUB_PAT=""
 
 ONBOARDING_URL="https://server.sparrow-earth.com/onboarding"
 USERNAME=""
 
-# ENV / FTP
 ENV_FILE=""
 FTP_PASS=""
 
-# I2C / DS3231
-I2C_BUS="1"     # Raspberry Pi typically uses /dev/i2c-1
+I2C_BUS="1"
 DS3231_ADDR="0x68"
+
+WP5_URL="https://www.uugear.com/repo/WittyPi5/wp5_latest.deb"
+WP5_DEB="/tmp/wp5_latest.deb"
+WP5_ADDR="0x51"
 
 ###############################################################################
 # 2.  -- UTILITY FUNCTIONS --
@@ -115,7 +130,8 @@ generate_unique_id() {
     local NEW_UUID
     NEW_UUID=$(uuidgen)
     echo "$NEW_UUID" | tee "$UUID_FILE" >/dev/null
-    chmod 644 "$UUID_FILE"; chown root:root "$UUID_FILE"
+    chmod 644 "$UUID_FILE"
+    chown root:root "$UUID_FILE"
     log "Generated UUID: $NEW_UUID"
 }
 
@@ -142,12 +158,44 @@ install_wget()  { command_exists wget  || { apt-get update -y; apt-get install -
 install_git()   { command_exists git   || { apt-get update -y; apt-get install -y git;   } }
 
 ###############################################################################
-# Docker / Compose (Pi / Debian Trixie)
+# Docker / Compose
 ###############################################################################
 install_docker_pi_debian() {
+    log "Installing Docker Engine + Compose from Docker's official Debian repo..."
+
+    apt-get remove -y docker.io docker-compose docker-doc podman-docker containerd runc || true
+
     apt-get update -y
-    apt-get install -y docker.io docker-compose-plugin
+    apt-get install -y ca-certificates curl gnupg
+
+    install -m 0755 -d /etc/apt/keyrings
+
+    if [[ ! -f /etc/apt/keyrings/docker.asc ]]; then
+        curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+        chmod a+r /etc/apt/keyrings/docker.asc
+    fi
+
+    local arch codename
+    arch="$(dpkg --print-architecture)"
+    codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+
+    cat >/etc/apt/sources.list.d/docker.list <<EOF
+deb [arch=${arch} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian ${codename} stable
+EOF
+
+    apt-get update -y
+
+    apt-get install -y \
+        docker-ce \
+        docker-ce-cli \
+        containerd.io \
+        docker-buildx-plugin \
+        docker-compose-plugin
+
     systemctl enable --now docker
+
+    docker --version
+    docker compose version
 }
 
 docker_compose_cmd() {
@@ -155,7 +203,7 @@ docker_compose_cmd() {
 }
 
 ###############################################################################
-# NetworkManager (for nmcli hotspot)
+# NetworkManager
 ###############################################################################
 install_network_manager() {
     command_exists nmcli && return
@@ -165,7 +213,7 @@ install_network_manager() {
 }
 
 ###############################################################################
-# I2C enablement (Pi)
+# I2C enablement
 ###############################################################################
 _pi_boot_config_path() {
     if [[ -f /boot/firmware/config.txt ]]; then
@@ -215,6 +263,53 @@ enable_ds3231_overlay_pi() {
         log "Added dtoverlay=i2c-rtc,ds3231 to $cfg"
         _info "DS3231 overlay added.\n\nReboot is required. Reboot, then rerun this script."
         exit 0
+    fi
+}
+
+###############################################################################
+# Witty Pi 5
+###############################################################################
+install_wittypi5() {
+    log "Installing Witty Pi 5 software..."
+    apt-get update -y
+    apt-get install -y wget i2c-tools ca-certificates
+    rm -f "$WP5_DEB"
+    wget -O "$WP5_DEB" "$WP5_URL"
+    apt-get install -y "$WP5_DEB"
+}
+
+detect_wittypi5() {
+    log "Checking for Witty Pi 5 on I2C..."
+    if ! i2cget -y "$I2C_BUS" "$WP5_ADDR" 0 >/dev/null 2>&1; then
+        _error "Witty Pi 5 not detected on I2C bus $I2C_BUS at address $WP5_ADDR.
+Check the HAT seating and make sure power goes into the Witty Pi board."
+        exit 1
+    fi
+}
+
+configure_wittypi5_auto_power_on() {
+    log "Configuring Witty Pi 5 auto power-on after power restore..."
+    i2cset -y "$I2C_BUS" "$WP5_ADDR" 17 0
+}
+
+verify_wittypi5_auto_power_on() {
+    log "Verifying Witty Pi 5 auto power-on setting..."
+    local value
+    value="$(i2cget -y "$I2C_BUS" "$WP5_ADDR" 17)"
+    log "Witty Pi 5 register 17 = $value"
+
+    if [[ "$value" != "0x00" ]]; then
+        _error "Failed to configure Witty Pi 5 auto power-on. Register 17 is $value, expected 0x00."
+        exit 1
+    fi
+}
+
+sync_wittypi5_rtc_from_system() {
+    log "Syncing Witty Pi 5 RTC from system time..."
+    if command_exists wp5; then
+        printf '1\n14\n' | wp5 >/dev/null 2>&1 || true
+    else
+        log "wp5 command not found; skipping Witty Pi 5 RTC sync."
     fi
 }
 
@@ -270,55 +365,91 @@ setup_persistent_wifi_hotspot() {
 }
 
 ###############################################################################
-# Models + repo (Triton layout preserved exactly)
+# Models + repo
 ###############################################################################
 download_model() {
-    local dir="$SYSTEM_FOLDER/Models/tritonserver/model_repository/megadetectorv6/$MODEL_DIR_NAME"
+    local dir="$SYSTEM_FOLDER/Models/megadetectorv6/$MODEL_DIR_NAME"
     local tmp="$dir/$MODEL_FILENAME_TEMP" fin="$dir/$MODEL_FILENAME_FINAL"
     mkdir -p "$dir"
     while true; do
         if _progress "Downloading Megadetector v6..." wget -q -O "$tmp" "$MODEL_DOWNLOAD_URL"; then
-            mv "$tmp" "$fin"; break
+            mv "$tmp" "$fin"
+            break
         fi
         _yesno "Megadetector download failed. Retry?" || { _error "Aborted."; exit 1; }
     done
 }
 
 download_model_ai4g() {
-    local dir="$SYSTEM_FOLDER/Models/tritonserver/model_repository/AI4GAmazonClassification/$AI4G_MODEL_DIR_NAME"
+    local dir="$SYSTEM_FOLDER/Models/AI4GAmazonClassification/$AI4G_MODEL_DIR_NAME"
     local tmp="$dir/$AI4G_MODEL_FILENAME_TEMP" fin="$dir/$AI4G_MODEL_FILENAME_FINAL"
     mkdir -p "$dir"
     while true; do
         if _progress "Downloading AI4G model..." wget -q -O "$tmp" "$AI4G_MODEL_DOWNLOAD_URL"; then
-            mv "$tmp" "$fin"; break
+            mv "$tmp" "$fin"
+            break
         fi
         _yesno "AI4G model download failed. Retry?" || { _error "Aborted."; exit 1; }
     done
 }
 
 download_model_audio_birds() {
-    local dir="$SYSTEM_FOLDER/Models/tritonserver/model_repository/megadetector_birds_v1/$AUDIO_BIRDS_MODEL_DIR_NAME"
+    local dir="$SYSTEM_FOLDER/Models/megadetector_birds_v1/$AUDIO_BIRDS_MODEL_DIR_NAME"
     local tmp="$dir/$AUDIO_BIRDS_MODEL_FILENAME_TEMP" fin="$dir/$AUDIO_BIRDS_MODEL_FILENAME_FINAL"
     mkdir -p "$dir"
     while true; do
         if _progress "Downloading MD Audio Birds v1..." wget -q -O "$tmp" "$AUDIO_BIRDS_MODEL_DOWNLOAD_URL"; then
-            mv "$tmp" "$fin"; break
+            mv "$tmp" "$fin"
+            break
         fi
         _yesno "Audio Birds model download failed. Retry?" || { _error "Aborted."; exit 1; }
     done
 }
 
-clone_public_repo() {
+prompt_github_pat() {
+    local p1 p2
+    while true; do
+        p1=$(_input "Enter GitHub fine-grained PAT for the private repo" hide)
+        p2=$(_input "Re-enter GitHub PAT" hide)
+
+        if [[ -z "${p1:-}" || -z "${p2:-}" ]]; then
+            _error "GitHub PAT cannot be empty."
+            continue
+        fi
+        if [[ "$p1" != "$p2" ]]; then
+            _error "PAT values do not match. Please try again."
+            continue
+        fi
+        GITHUB_PAT="$p1"
+        break
+    done
+}
+
+clone_private_repo() {
     CLONE_DIR="$SYSTEM_FOLDER"
     local tmpdir
     tmpdir="$(mktemp -d)"
-    _progress "Cloning repo..." git clone "$REPO_URL" "$tmpdir"
+
+    log "Cloning private repo..."
+
+    if ! git -c http.extraHeader="Authorization: Basic $(printf 'x-access-token:%s' "$GITHUB_PAT" | base64 -w0)" \
+        clone "$REPO_URL" "$tmpdir"; then
+        rm -rf "$tmpdir"
+        _error "Failed to clone private repo. Check:
+- the repo URL is correct
+- the PAT has access to this repo
+- the PAT has Contents: Read-only permission"
+        exit 1
+    fi
+
     (
       shopt -s dotglob
       cp -a "$tmpdir"/* "$CLONE_DIR"/
     )
+
     rm -rf "$tmpdir"
     create_additional_directories
+    unset GITHUB_PAT
 }
 
 create_additional_directories() {
@@ -330,171 +461,18 @@ create_folders() {
     local uh
     uh=$(eval echo ~"${SUDO_USER:-$USER}")
     SYSTEM_FOLDER="$uh/Desktop/system"
-    mkdir -p "$SYSTEM_FOLDER/Models/tritonserver/model_repository/megadetectorv6/$MODEL_DIR_NAME"
-    mkdir -p "$SYSTEM_FOLDER/Models/tritonserver/model_repository/AI4GAmazonClassification/$AI4G_MODEL_DIR_NAME"
-    mkdir -p "$SYSTEM_FOLDER/Models/tritonserver/model_repository/megadetector_birds_v1/$AUDIO_BIRDS_MODEL_DIR_NAME"
+
+    mkdir -p "$SYSTEM_FOLDER/Models/megadetectorv6/$MODEL_DIR_NAME"
+    mkdir -p "$SYSTEM_FOLDER/Models/AI4GAmazonClassification/$AI4G_MODEL_DIR_NAME"
+    mkdir -p "$SYSTEM_FOLDER/Models/megadetector_birds_v1/$AUDIO_BIRDS_MODEL_DIR_NAME"
+
     CLONE_DIR="$SYSTEM_FOLDER"
-
-# config.pbtxt - Megadetector
-cat >"$SYSTEM_FOLDER/Models/tritonserver/model_repository/megadetectorv6/config.pbtxt" <<'EOF'
-name: "megadetectorv6"
-platform: "onnxruntime_onnx"
-max_batch_size: 0
-
-input [
-  {
-    name: "images"
-    data_type: TYPE_FP32
-    dims: [1, 3, 640, 640]
-  }
-]
-
-output [
-  {
-    name: "output0"
-    data_type: TYPE_FP32
-    dims: [-1, -1, -1]
-  }
-]
-
-parameters {
-  key: "intra_op_num_threads"
-  value: { string_value: "2" }
-}
-parameters {
-  key: "inter_op_num_threads"
-  value: { string_value: "2" }
-}
-parameters {
-  key: "execution_mode"
-  value: { string_value: "1" }   # 1=parallel, 0=sequential
-}
-parameters {
-  key: "enable_cpu_mem_arena"
-  value: { string_value: "1" }
-}
-parameters {
-  key: "enable_mem_pattern"
-  value: { string_value: "1" }
-}
-
-instance_group [
-  {
-    kind: KIND_GPU
-    gpus: [0]
-    count: 1
-  }
-]
-EOF
-
-# config.pbtxt - AI4G Amazon Classificaion Model
-cat >"$SYSTEM_FOLDER/Models/tritonserver/model_repository/AI4GAmazonClassification/config.pbtxt" <<'EOF'
-name: "AI4GAmazonClassification"
-platform: "onnxruntime_onnx"
-max_batch_size: 0
-
-input [
-  {
-    name: "input"
-    data_type: TYPE_FP32
-    dims: [-1, 3, 224, 224]
-  }
-]
-
-output [
-  {
-    name: "output"
-    data_type: TYPE_FP32
-    dims: [-1, 36]
-  }
-]
-
-parameters {
-  key: "intra_op_num_threads"
-  value: { string_value: "2" }
-}
-parameters {
-  key: "inter_op_num_threads"
-  value: { string_value: "2" }
-}
-parameters {
-  key: "execution_mode"
-  value: { string_value: "1" }   # 1=parallel, 0=sequential
-}
-parameters {
-  key: "enable_cpu_mem_arena"
-  value: { string_value: "1" }
-}
-parameters {
-  key: "enable_mem_pattern"
-  value: { string_value: "1" }
-}
-
-instance_group [
-  {
-    kind: KIND_GPU
-    gpus: [0]
-    count: 1
-  }
-]
-EOF
-
-# config.pbtxt - MD Audio Birds v1
-cat >"$SYSTEM_FOLDER/Models/tritonserver/model_repository/megadetector_birds_v1/config.pbtxt" <<'EOF'
-name: "megadetector_birds_v1"
-backend: "onnxruntime"
-max_batch_size: 32
-
-input [
-  {
-    name: "input"
-    data_type: TYPE_FP32
-    dims: [1, 224, -1]
-  }
-]
-
-output [
-  {
-    name: "logits"
-    data_type: TYPE_FP32
-    dims: [1]
-  }
-]
-
-parameters {
-  key: "intra_op_num_threads"
-  value: { string_value: "2" }
-}
-parameters {
-  key: "inter_op_num_threads"
-  value: { string_value: "2" }
-}
-parameters {
-  key: "execution_mode"
-  value: { string_value: "1" }   # 1 = parallel, 0 = sequential
-}
-parameters {
-  key: "enable_cpu_mem_arena"
-  value: { string_value: "1" }
-}
-parameters {
-  key: "enable_mem_pattern"
-  value: { string_value: "1" }
-}
-
-instance_group [
-  {
-    kind: KIND_GPU
-    gpus: [0]
-    count: 1
-  }
-]
-EOF
 
     download_model
     download_model_ai4g
     download_model_audio_birds
-    clone_public_repo
+    prompt_github_pat
+    clone_private_repo
 }
 
 install_smbus2() {
@@ -504,7 +482,7 @@ install_smbus2() {
 }
 
 ###############################################################################
-# 2b. -- FTP_PASS PROMPT + .env UPDATE --
+# FTP_PASS
 ###############################################################################
 prompt_ftp_pass() {
     local p1 p2
@@ -571,7 +549,7 @@ configure_ftp_pass_in_env() {
 }
 
 ###############################################################################
-# 3.  -- DS3231 RTC SEED --
+# DS3231 RTC SEED
 ###############################################################################
 seed_ds3231() {
     log "Seeding DS3231 RTC with current UTC time..."
@@ -723,11 +701,13 @@ onboard_device() {
 }
 
 ###############################################################################
-# 4.  -- MAIN SCRIPT LOGIC --
+# MAIN
 ###############################################################################
 [ "$EUID" -eq 0 ] || { _error "Run as root (sudo)."; exit 1; }
 _install_zenity
-touch "$LOG_FILE"; chmod 644 "$LOG_FILE"
+touch "$LOG_FILE"
+chmod 644 "$LOG_FILE"
+exec > >(tee -a "$LOG_FILE") 2>&1
 
 _info "Welcome to the SPARROW Setup Wizard (Raspberry Pi 5 / Debian Trixie)!\nThis will install prerequisites, download the required models and start SPARROW."
 
@@ -737,7 +717,6 @@ _yesno "Are you running this on a Raspberry Pi 5 (Debian Trixie) with internet a
 _info "Checking internet connectivity. Press ok to continue"
 ping -c3 8.8.8.8 >/dev/null 2>&1 || { _error "No internet connection."; exit 1; }
 
-# Ensure I2C (and optionally DS3231 overlay) is enabled BEFORE smbus use
 enable_i2c_pi
 if _yesno "Enable DS3231 device-tree overlay (dtoverlay=i2c-rtc,ds3231) in boot config?"; then
     enable_ds3231_overlay_pi
@@ -746,30 +725,32 @@ fi
 install_wget
 install_git
 install_curl
-
-# NetworkManager is required for nmcli hotspot approach
 install_network_manager
+
+install_wittypi5
+detect_wittypi5
+configure_wittypi5_auto_power_on
+verify_wittypi5_auto_power_on
 
 create_folders
 install_uuidgen
 generate_unique_id
 
-if command_exists docker; then
-    log "Docker already installed."
+if command_exists docker && docker compose version >/dev/null 2>&1; then
+    log "Docker Engine and Docker Compose already installed."
 else
-    _progress "Installing Docker + Compose (Debian packages)..." install_docker_pi_debian
+    _progress "Installing Docker Engine + Compose..." install_docker_pi_debian
 fi
 
-# prompt for hotspot password before configuring Wi-Fi AP
 prompt_hotspot_password
 setup_persistent_wifi_hotspot
 
-# prompt for FTP_PASS and write it into the env file before containers run
 prompt_ftp_pass
 configure_ftp_pass_in_env
 
 install_smbus2
 seed_ds3231
+sync_wittypi5_rtc_from_system
 configure_access_key
 onboard_device || log "Onboarding did not complete successfully; continuing setup."
 
@@ -792,7 +773,6 @@ else
     log "docker compose build (CLI) with BuildKit + no-cache completed"
 fi
 
-# 1) Start in detached mode
 if $GUI && command -v zenity >/dev/null; then
     log "docker compose up (GUI+console) started"
     docker_compose_cmd up -d 2>&1 \
@@ -807,7 +787,6 @@ else
     log "Sparrow containers started"
 fi
 
-# 2) Follow the logs in real time
 log "Tailing Sparrow logs (Ctrl-C to exit)..."
 if $GUI && command -v zenity >/dev/null; then
     docker_compose_cmd logs --no-color --follow \
