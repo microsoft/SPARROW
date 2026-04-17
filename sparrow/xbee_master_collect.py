@@ -2,12 +2,14 @@
 """
 xbee_master_collect.py
 
-Step 1 + Step 2 hardening:
+Hardening:
 - Serial open retry loop
 - Serial read/write recovery loop
 - Preserves pending RD queues across reconnects
 - Clears active transfer and partial reassembly on reconnect
-- Intended to run with a stable device path like /dev/xbee
+
+Startup logging:
+- Reads and logs local XBee NI / SH / SL / 64-bit address at startup
 """
 
 import os
@@ -56,7 +58,7 @@ def setup_logger(log_path: str, max_bytes: int, backup_count: int, console: bool
 def read_exact(ser: serial.Serial, n: int) -> bytes | None:
     buf = bytearray()
     while len(buf) < n:
-        chunk = ser.read(n - len(buf))  # let SerialException/OSError bubble up
+        chunk = ser.read(n - len(buf))
         if not chunk:
             return None
         buf.extend(chunk)
@@ -66,7 +68,7 @@ def read_exact(ser: serial.Serial, n: int) -> bytes | None:
 def read_api_frame(ser: serial.Serial) -> bytes | None:
     """Read one full valid XBee API frame and return its frame_data."""
     while True:
-        b = ser.read(1)  # let SerialException/OSError bubble up
+        b = ser.read(1)
         if not b:
             return None
         if b[0] != START_DELIM:
@@ -109,6 +111,12 @@ def build_tx_request_0x10(frame_id: int, dest64_int: int, rf_data: bytes) -> byt
     return build_api_frame(frame)
 
 
+def build_at_command_0x08(frame_id: int, at_cmd: str, parameter: bytes = b"") -> bytes:
+    frame_type = 0x08
+    frame = struct.pack(">BB2s", frame_type, frame_id, at_cmd.encode("ascii")) + parameter
+    return build_api_frame(frame)
+
+
 def src64_bytes_to_int(src64_b: bytes) -> int:
     return int.from_bytes(src64_b, "big", signed=False)
 
@@ -128,11 +136,42 @@ def open_serial_forever(port: str, baud: int, logger: logging.Logger, timeout: f
             time.sleep(2)
 
 
+def xbee_local_at(ser: serial.Serial, at_cmd: str, logger: logging.Logger, timeout_s: float = 2.0) -> bytes | None:
+    """
+    Send a local AT command (0x08) and wait for AT Command Response (0x88).
+    Returns parameter bytes on success, or None.
+    """
+    frame_id = 0x52
+    ser.write(build_at_command_0x08(frame_id, at_cmd))
+    ser.flush()
+
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        frame = read_api_frame(ser)
+        if not frame:
+            continue
+        if frame[0] != 0x88 or len(frame) < 5:
+            continue
+        if frame[1] != frame_id:
+            continue
+        if frame[2:4] != at_cmd.encode("ascii"):
+            continue
+
+        status = frame[4]
+        if status != 0x00:
+            logger.warning("AT %s failed status=0x%02X", at_cmd, status)
+            return None
+        return frame[5:]
+
+    logger.warning("AT %s timed out", at_cmd)
+    return None
+
+
 # -------------------- Main --------------------
 
 def main():
     ap = argparse.ArgumentParser(description="DigiMesh master with reconnecting serial.")
-    ap.add_argument("--port", required=True, help="Serial port, preferably stable path like /dev/xbee")
+    ap.add_argument("--port", required=True, help="Serial port")
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--out", default="received_images", help="Output directory")
     ap.add_argument("--session-timeout", type=float, default=30.0, help="Seconds before abandoning a stalled session")
@@ -160,7 +199,6 @@ def main():
 
     os.makedirs(args.out, exist_ok=True)
 
-    # Round-robin scheduling structures
     dev_queues: dict[int, deque] = {}
     rr = deque()
     rr_set = set()
@@ -170,6 +208,7 @@ def main():
 
     frame_id = 1
     ser = None
+    master_id_logged = False
 
     def next_frame_id(cur: int) -> int:
         return (cur % 255) + 1
@@ -177,12 +216,12 @@ def main():
     def send_to(src64_int: int, rf: bytes):
         nonlocal frame_id, ser
         tx = build_tx_request_0x10(frame_id, src64_int, rf)
-        ser.write(tx)   # let SerialException/OSError bubble up
+        ser.write(tx)
         ser.flush()
         frame_id = next_frame_id(frame_id)
 
     def reset_link_state(reason: str):
-        nonlocal active, sessions
+        nonlocal active, sessions, master_id_logged
         if active is not None or sessions:
             logger.warning(
                 "LINK reset reason=%s clearing active=%s partial_sessions=%d",
@@ -192,6 +231,34 @@ def main():
             )
         active = None
         sessions.clear()
+        master_id_logged = False
+
+    def log_local_xbee_identity():
+        nonlocal master_id_logged, ser
+        if master_id_logged or ser is None:
+            return
+
+        try:
+            ni_b = xbee_local_at(ser, "NI", logger)
+            sh_b = xbee_local_at(ser, "SH", logger)
+            sl_b = xbee_local_at(ser, "SL", logger)
+
+            ni = ni_b.decode("utf-8", errors="replace") if ni_b else ""
+            sh = int.from_bytes(sh_b, "big") if sh_b else None
+            sl = int.from_bytes(sl_b, "big") if sl_b else None
+
+            if sh is not None and sl is not None:
+                addr64 = (sh << 32) | sl
+                logger.info(
+                    "MASTER identity NI='%s' addr64=%s SH=%08X SL=%08X",
+                    ni, fmt64(addr64), sh, sl
+                )
+            else:
+                logger.info("MASTER identity NI='%s' addr64=unknown", ni)
+
+            master_id_logged = True
+        except Exception:
+            logger.exception("Failed to read local XBee identity")
 
     def _ensure_device(src64_int: int):
         if src64_int not in dev_queues:
@@ -285,6 +352,7 @@ def main():
                 if ser is None or not ser.is_open:
                     ser = open_serial_forever(args.port, args.baud, logger, timeout=0.2)
                     reset_link_state("serial-open")
+                    log_local_xbee_identity()
 
                 if active is None:
                     nxt = pop_next_rr()
@@ -318,7 +386,7 @@ def main():
                 frame = read_api_frame(ser)
                 if not frame:
                     continue
-                
+
                 logger.debug("RX raw frame type=0x%02X len=%d", frame[0], len(frame))
 
                 if frame[0] != 0x90 or len(frame) < 12:
@@ -473,7 +541,7 @@ def main():
                 time.sleep(1)
 
     except KeyboardInterrupt:
-                    logger.info("MASTER exiting (KeyboardInterrupt).")
+        logger.info("MASTER exiting (KeyboardInterrupt).")
     finally:
         try:
             if ser is not None:
