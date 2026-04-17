@@ -19,7 +19,7 @@ services:
       - /etc/unique_id:/host/etc/unique_id:ro
       - ./Models/tritonserver/model_repository:/home/sparrow/Desktop/system/Models/tritonserver/model_repository
     devices:
-      - /dev/serial/by-id/usb-FTDI_FT232R_USB_UART_B00258GN-if00-port0:/dev/xbee
+      - /dev/ttyUSB0:/dev/ttyUSB0
     privileged: true
     restart: unless-stopped
 
