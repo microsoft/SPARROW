@@ -461,17 +461,47 @@ prompt_robin_usage() {
     fi
 }
 
+detect_xbee_port() {
+    local port=""
+
+    if [[ -d /dev/serial/by-id ]]; then
+        for dev in /dev/serial/by-id/*; do
+            [[ -e "$dev" ]] || continue
+            port="$(readlink -f "$dev")"
+            [[ -n "$port" ]] && break
+        done
+    fi
+
+    if [[ -z "$port" ]]; then
+        for dev in /dev/ttyUSB* /dev/ttyACM*; do
+            [[ -e "$dev" ]] || continue
+            port="$dev"
+            break
+        done
+    fi
+
+    if [[ -z "$port" ]]; then
+        _error "Could not auto-detect XBee serial device."
+        return 1
+    fi
+
+    echo "$port"
+}
+
 run_xbee_configure_if_needed() {
     [[ "${USE_ROBIN:-false}" == "true" ]] || {
         log "ROBIN not in use; skipping xbee_configure.py"
         return 0
     }
 
-    log "Running xbee_configure.py for ROBIN..."
+    local xbee_port
+    xbee_port="$(detect_xbee_port)" || exit 1
+
+    log "Running xbee_configure.py for ROBIN on port $xbee_port..."
     (
         cd "$SYSTEM_FOLDER/sparrow"
         python xbee_configure.py \
-          --port /dev/ttyUSB0 \
+          --port "$xbee_port" \
           --baud 115200 \
           --api 1 \
           --rf 1 \
