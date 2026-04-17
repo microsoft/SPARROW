@@ -318,8 +318,11 @@ def main():
                 frame = read_api_frame(ser)
                 if not frame:
                     continue
+                
+                logger.debug("RX raw frame type=0x%02X len=%d", frame[0], len(frame))
 
                 if frame[0] != 0x90 or len(frame) < 12:
+                    logger.debug("RX ignored frame type=0x%02X len=%d", frame[0], len(frame))
                     continue
 
                 src64_int = src64_bytes_to_int(frame[1:9])
@@ -357,6 +360,18 @@ def main():
 
                 total_chunks = struct.unpack(">H", rf[6:8])[0]
                 chunk_index = struct.unpack(">H", rf[8:10])[0]
+
+                if total_chunks == 0:
+                    logger.warning("RX invalid total_chunks dev=%s sid=%08x total=0", fmt64(src64_int), sid)
+                    continue
+
+                if chunk_index >= total_chunks:
+                    logger.warning(
+                        "RX invalid chunk index dev=%s sid=%08x idx=%d total=%d",
+                        fmt64(src64_int), sid, chunk_index, total_chunks
+                    )
+                    continue
+
                 flags = rf[10]
                 is_first = (flags & 0x01) != 0
 
@@ -447,11 +462,18 @@ def main():
                 time.sleep(1)
 
             except Exception:
-                logger.exception("Unhandled exception in main loop")
+                logger.exception("Unhandled exception in main loop; resetting link state")
+                try:
+                    if ser is not None:
+                        ser.close()
+                except Exception:
+                    pass
+                ser = None
+                reset_link_state("unhandled-exception")
                 time.sleep(1)
 
     except KeyboardInterrupt:
-        logger.info("MASTER exiting (KeyboardInterrupt).")
+                    logger.info("MASTER exiting (KeyboardInterrupt).")
     finally:
         try:
             if ser is not None:
