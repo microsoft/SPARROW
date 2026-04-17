@@ -96,6 +96,7 @@ AUDIO_BIRDS_MODEL_FILENAME_FINAL="model.onnx"
 REPO_URL="https://github.com/Clamps251/sparrow-pi.git"
 CLONE_DIR=""
 GITHUB_PAT=""
+USE_ROBIN=false
 
 ONBOARDING_URL="https://server.sparrow-earth.com/onboarding"
 USERNAME=""
@@ -452,6 +453,34 @@ clone_private_repo() {
     unset GITHUB_PAT
 }
 
+prompt_robin_usage() {
+    if _yesno "Is ROBIN being used?"; then
+        USE_ROBIN=true
+    else
+        USE_ROBIN=false
+    fi
+}
+
+run_xbee_configure_if_needed() {
+    [[ "${USE_ROBIN:-false}" == "true" ]] || {
+        log "ROBIN not in use; skipping xbee_configure.py"
+        return 0
+    }
+
+    log "Running xbee_configure.py for ROBIN..."
+    (
+        cd "$SYSTEM_FOLDER/sparrow"
+        python xbee_configure.py \
+          --port /dev/ttyUSB0 \
+          --baud 115200 \
+          --api 1 \
+          --rf 1 \
+          --router 0 \
+          --netid 1234 \
+          --node SPARROW_MASTER
+    )
+}
+
 create_additional_directories() {
     mkdir -p "$SYSTEM_FOLDER/sparrow"/{logs,images,recordings,static/data,static/gallery,config}
     mkdir -p "$SYSTEM_FOLDER/starlink"/{logs,config}
@@ -473,6 +502,8 @@ create_folders() {
     download_model_audio_birds
     prompt_github_pat
     clone_private_repo
+    prompt_robin_usage
+    run_xbee_configure_if_needed
 }
 
 install_smbus2() {
