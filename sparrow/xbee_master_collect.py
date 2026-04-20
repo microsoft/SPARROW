@@ -395,7 +395,24 @@ def main():
 
                 src64_int = src64_bytes_to_int(frame[1:9])
                 rf = frame[12:]
+
+                logger.debug(
+                    "RX 0x90 from=%s rf=%r rf_hex=%s",
+                    fmt64(src64_int),
+                    rf,
+                    rf.hex()
+                )
+
                 if len(rf) < 2:
+                    continue
+
+                if rf.startswith(b"SG?"):
+                    logger.info("SG? <- dev=%s", fmt64(src64_int))
+                    try:
+                        send_to(src64_int, b"SG!")
+                        logger.info("SG! -> dev=%s", fmt64(src64_int))
+                    except Exception:
+                        logger.exception("SG! send failed dev=%s", fmt64(src64_int))
                     continue
 
                 if rf.startswith(b"RD"):
