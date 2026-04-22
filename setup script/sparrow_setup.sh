@@ -98,8 +98,8 @@ CLONE_DIR=""
 GITHUB_PAT=""
 USE_ROBIN=false
 
-ONBOARDING_URL="https://server.sparrow-earth.com/onboarding"
-USERNAME=""
+ONBOARDING_URL="https://server.sparrow-earth.com/v1/onboarding"
+EMAIL=""
 
 ENV_FILE=""
 FTP_PASS=""
@@ -700,9 +700,9 @@ configure_access_key() {
     echo "$k1" >"$SYSTEM_FOLDER/starlink/config/access_key.txt"
 
     while true; do
-        USERNAME=$(_input "Enter Sparrow Username")
-        if [[ -z "$USERNAME" ]]; then
-            _error "Username cannot be empty - try again."
+        EMAIL=$(_input "Enter Sparrow Email")
+        if [[ -z "$EMAIL" ]]; then
+            _error "Email cannot be empty - try again."
             continue
         fi
         break
@@ -720,7 +720,7 @@ onboard_device() {
 
     api_key=$(tr -d '\r\n' <"$access_key_file")
     [[ -n "$api_key" ]] || { _error "Access key file is empty; cannot onboard."; return 1; }
-    [[ -n "$USERNAME" ]] || { _error "Username is not set in memory; cannot onboard."; return 1; }
+    [[ -n "$EMAIL" ]] || { _error "Email is not set in memory; cannot onboard."; return 1; }
 
     hwid=$(get_hardware_id) || { _error "Cannot compute hardware id for onboarding."; return 1; }
 
@@ -728,13 +728,13 @@ onboard_device() {
     log "Onboarding JSON payload (len=${#json_payload}): $json_payload"
 
     while (( attempt <= max_retries )); do
-        log "Onboarding attempt $attempt/$max_retries for unit_id=$hwid (username=$USERNAME)"
+        log "Onboarding attempt $attempt/$max_retries for unit_id=$hwid (email=$EMAIL)"
 
         resp=$(curl -sS -w "%{http_code}" \
             -X POST "$ONBOARDING_URL" \
             -H "Content-Type: application/json" \
             -H "X-API-Key: $api_key" \
-            -H "X-Username: $USERNAME" \
+            -H "X-Email: $EMAIL" \
             --data-binary "$json_payload" 2>/dev/null || true)
 
         status_code=${resp: -3}
