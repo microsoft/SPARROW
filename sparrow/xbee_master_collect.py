@@ -7,6 +7,8 @@ Hardening:
 - Serial read/write recovery loop
 - Preserves pending RD queues across reconnects
 - Clears active transfer and partial reassembly on reconnect
+- Resets serial buffers after open
+- Reopens serial if no frames are seen for a while
 
 Startup logging:
 - Reads and logs local XBee NI / SH / SL / 64-bit address at startup
@@ -129,6 +131,19 @@ def open_serial_forever(port: str, baud: int, logger: logging.Logger, timeout: f
     while True:
         try:
             ser = serial.Serial(port, baud, timeout=timeout)
+
+            try:
+                ser.reset_input_buffer()
+            except Exception:
+                pass
+
+            try:
+                ser.reset_output_buffer()
+            except Exception:
+                pass
+
+            time.sleep(0.5)
+
             logger.info("SERIAL open ok port=%s baud=%d timeout=%.1f", port, baud, timeout)
             return ser
         except (serial.SerialException, OSError) as e:
@@ -180,6 +195,8 @@ def main():
     ap.add_argument("--per-device-cap", type=int, default=2, help="Max pending sessions kept per device")
     ap.add_argument("--coalesce-latest", action="store_true",
                     help="If set, keep ONLY the latest RD per device (drops older pending for that device)")
+    ap.add_argument("--serial-idle-reopen", type=float, default=90.0,
+                    help="Reopen serial if no valid frames are seen for this many seconds")
 
     ap.add_argument("--log", default="logs/xbee_master.log", help="Log file path (rotating)")
     ap.add_argument("--log-bytes", type=int, default=5_000_000, help="Rotate after N bytes")
@@ -209,6 +226,7 @@ def main():
     frame_id = 1
     ser = None
     master_id_logged = False
+    last_frame_time = time.time()
 
     def next_frame_id(cur: int) -> int:
         return (cur % 255) + 1
@@ -353,6 +371,7 @@ def main():
                     ser = open_serial_forever(args.port, args.baud, logger, timeout=0.2)
                     reset_link_state("serial-open")
                     log_local_xbee_identity()
+                    last_frame_time = time.time()
 
                 if active is None:
                     nxt = pop_next_rr()
@@ -385,7 +404,18 @@ def main():
 
                 frame = read_api_frame(ser)
                 if not frame:
+                    if (time.time() - last_frame_time) > args.serial_idle_reopen:
+                        logger.warning("No serial frames for %.1fs; reopening port", args.serial_idle_reopen)
+                        try:
+                            ser.close()
+                        except Exception:
+                            pass
+                        ser = None
+                        reset_link_state("serial-idle")
+                        time.sleep(1)
                     continue
+
+                last_frame_time = time.time()
 
                 logger.debug("RX raw frame type=0x%02X len=%d", frame[0], len(frame))
 
