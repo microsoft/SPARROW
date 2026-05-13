@@ -46,7 +46,7 @@ logs_dir = "/app/logs/restclient_logs.log"
 
 SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrow-earth.com").rstrip("/")
 
-image_server_url   = f"{SERVER_BASE_URL}/uploads"
+image_server_url   = f"{SERVER_BASE_URL}/uploads/image"
 audio_server_url   = f"{SERVER_BASE_URL}/audio_uploads"
 system_metrics_url = f"{SERVER_BASE_URL}/system_metrics"
 
@@ -248,36 +248,57 @@ except Exception as e:
     bus = None
 
 # Upload Functions
+def _load_sidecar_or_fallback(image_path, csv_rows):
+    """Return server-ready metadata dict. Prefer the sidecar JSON written by inference.py;
+    fall back to a minimal payload built from CSV rows when no sidecar exists (covers
+    JPEGs left over from before this change)."""
+    image_name = os.path.basename(image_path)
+    side_path = os.path.splitext(image_path)[0] + ".json"
+    if os.path.isfile(side_path):
+        try:
+            with open(side_path, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to read sidecar {side_path}: {e}; falling back to CSV-only metadata.")
+
+    captured_at = csv_rows[0].get("Date", "") if csv_rows else ""
+    return {
+        "image_name": image_name,
+        "captured_at": captured_at,
+        "detections": [],
+    }
+
+
 def upload_image_and_data(image_path, detection_data_list):
-    """Upload one image with all matching detection rows; delete CSV rows on success elsewhere."""
+    """Upload one image plus its sidecar metadata in a single POST to /uploads/image."""
     image_name = os.path.basename(image_path)
     if not is_server_online(image_server_url):
         logger.warning(f"Image server appears offline, skipping upload for {image_name}.")
         return False
 
-    success = True
-    for detection_data in detection_data_list:
-        try:
-            with open(image_path, "rb") as image_file:
-                files = {"file": (image_name, image_file, "image/jpeg")}
-                data = {
-                    "auth_key": auth_key,
-                    "unique_id": unique_id,
-                    "image_name": detection_data["Image Name"],
-                    "detection": detection_data["Detection"],
-                    "confidence": float(detection_data["Confidence Score"]),
-                    "date": detection_data["Date"],
-                }
-                logger.info("Sending image data to server: %s",
-                    {k: v for k, v in data.items() if k != "auth_key"})
-                response = requests.post(image_server_url, files=files, data=data, timeout=30)
-                response.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to upload {image_name} with detection {detection_data['Detection']}: {e}")
-            success = False
-        else:
-            logger.info(f"Successfully uploaded {image_name} with detection {detection_data['Detection']}")
-    return success
+    meta = _load_sidecar_or_fallback(image_path, detection_data_list)
+    detections = meta.get("detections", [])
+
+    try:
+        with open(image_path, "rb") as image_file:
+            files = {"file": (image_name, image_file, "image/jpeg")}
+            data = {
+                "auth_key": auth_key,
+                "unique_id": unique_id,
+                "metadata": json.dumps(meta),
+            }
+            logger.info(
+                "Sending image to server: image=%s detections=%d captured_at=%s",
+                image_name, len(detections), meta.get("captured_at", "")
+            )
+            response = requests.post(image_server_url, files=files, data=data, timeout=30)
+            response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to upload {image_name}: {e}")
+        return False
+
+    logger.info(f"Successfully uploaded {image_name} ({len(detections)} detections)")
+    return True
 
 def upload_audio_file(audio_path):
     """Upload a single .wav file; return True on success."""
@@ -348,21 +369,37 @@ def process_and_upload_images():
         return
 
     for image_name in os.listdir(image_output_dir):
+        if not image_name.lower().endswith((".jpg", ".jpeg", ".png")):
+            continue
         image_path = os.path.join(image_output_dir, image_name)
-        if os.path.isfile(image_path):
-            logger.info(f"Processing image {image_name}.")
-            detection_data_list = detection_records.get(image_name, [])
-            if detection_data_list:
-                success = upload_image_and_data(image_path, detection_data_list)
-                if success:
-                    remove_records_from_csv(image_name)
-                    try:
-                        os.remove(image_path)
-                        logger.info(f"Deleted local image file: {image_path}")
-                    except Exception as e:
-                        logger.error(f"Failed to delete image file {image_path}: {e}")
-            else:
-                logger.warning(f"No corresponding detection records found for {image_name}.")
+        if not os.path.isfile(image_path):
+            continue
+
+        logger.info(f"Processing image {image_name}.")
+        detection_data_list = detection_records.get(image_name, [])
+        if not detection_data_list:
+            logger.warning(f"No corresponding detection records found for {image_name}.")
+            continue
+
+        success = upload_image_and_data(image_path, detection_data_list)
+        if not success:
+            continue
+
+        remove_records_from_csv(image_name)
+        try:
+            os.remove(image_path)
+            logger.info(f"Deleted local image file: {image_path}")
+        except Exception as e:
+            logger.error(f"Failed to delete image file {image_path}: {e}")
+
+        side_path = os.path.splitext(image_path)[0] + ".json"
+        try:
+            os.remove(side_path)
+            logger.info(f"Deleted sidecar: {side_path}")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            logger.error(f"Failed to delete sidecar {side_path}: {e}")
 
 def process_and_upload_audio():
     """

@@ -383,6 +383,22 @@ def save_jpeg_with_boxes(img, boxes_meta, out_path):
     img.save(out_path, format="JPEG", exif=exif_bytes_out)
 
 
+def save_sidecar_metadata(out_path, image_name, captured_at_iso, img_w, img_h, pixel_boxes):
+    """Write <out_path>.json (sibling of the JPEG) with server-ready metadata."""
+    sidecar = {
+        "image_name": image_name,
+        "captured_at": captured_at_iso,
+        "image_width": img_w,
+        "image_height": img_h,
+        "detections": pixel_boxes,
+    }
+    side_path = os.path.splitext(out_path)[0] + ".json"
+    tmp = side_path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(sidecar, f)
+    os.replace(tmp, side_path)
+
+
 # Background Settings Fetch
 try:
     with open(AUTH_KEY_PATH, "r") as f:
@@ -518,6 +534,7 @@ while True:
         skipped_count = 0
 
         boxes_meta = []
+        pixel_boxes = []
         img_w, img_h = image.size
 
         annotated_img = image.copy() if DRAW_BOXES else image
@@ -601,6 +618,15 @@ while True:
                 }
             )
 
+            pixel_boxes.append(
+                {
+                    "label": stored_label,
+                    "confidence": float(stored_conf),
+                    "bbox": [int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2))],
+                    "class_id": int(cls_id),
+                }
+            )
+
         if ONLY_SAVE_ANIMALS and skipped_count:
             log.info(f"{image_name}: skipped {skipped_count} non-animal detection(s) due to ONLY_SAVE_ANIMALS")
 
@@ -627,6 +653,12 @@ while True:
                 img_to_save.save(out_path)
         except Exception as e:
             log.error(f"Failed to save output image {out_path}: {e}")
+
+        try:
+            captured_at_iso = date.strftime("%Y-%m-%dT%H:%M:%SZ")
+            save_sidecar_metadata(out_path, image_name, captured_at_iso, img_w, img_h, pixel_boxes)
+        except Exception as e:
+            log.error(f"Failed to write sidecar JSON for {out_path}: {e}")
 
         # Remove original after processing
         try:
