@@ -105,7 +105,6 @@ ENV_FILE=""
 FTP_PASS=""
 
 I2C_BUS="1"
-DS3231_ADDR="0x68"
 
 WP5_URL="https://www.uugear.com/repo/WittyPi5/wp5_latest.deb"
 WP5_DEB="/tmp/wp5_latest.deb"
@@ -302,15 +301,6 @@ verify_wittypi5_auto_power_on() {
     if [[ "$value" != "0x00" ]]; then
         _error "Failed to configure Witty Pi 5 auto power-on. Register 17 is $value, expected 0x00."
         exit 1
-    fi
-}
-
-sync_wittypi5_rtc_from_system() {
-    log "Syncing Witty Pi 5 RTC from system time..."
-    if command_exists wp5; then
-        printf '1\n14\n' | wp5 >/dev/null 2>&1 || true
-    else
-        log "wp5 command not found; skipping Witty Pi 5 RTC sync."
     fi
 }
 
@@ -609,84 +599,6 @@ configure_ftp_pass_in_env() {
     log "Set FTP_PASS in env file: $ENV_FILE"
 }
 
-###############################################################################
-# DS3231 RTC SEED
-###############################################################################
-seed_ds3231() {
-    log "Seeding DS3231 RTC with current UTC time..."
-    local max_retries=5
-    local attempt=1
-    local current_time=""
-
-    while [ $attempt -le $max_retries ]; do
-        log "Attempt $attempt/$max_retries: fetching UTC from World Clock API..."
-        raw=$(curl -sL http://worldclockapi.com/api/json/utc/now || true)
-        current_time=$(echo "${raw:-}" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("currentDateTime",""))' 2>/dev/null || true)
-
-        if [ -n "${current_time:-}" ]; then
-            current_time=$(echo "$current_time" | sed 's/T/ /; s/Z//'):00
-            log "Retrieved UTC time from API: $current_time"
-            break
-        fi
-
-        log "World Clock API fetch failed on attempt $attempt."
-        attempt=$((attempt+1))
-        sleep 2
-    done
-
-    if [ -z "${current_time:-}" ]; then
-        log "World Clock API failed after $max_retries attempts. Falling back to system time (UTC)."
-        current_time=$(date -u +"%Y-%m-%d %H:%M:%S")
-        log "Using local UTC time: $current_time"
-    fi
-
-    local write_attempts=1
-    while [ $write_attempts -le $max_retries ]; do
-        if python3 - <<EOF
-import smbus2
-from datetime import datetime
-
-rtc = datetime.strptime("$current_time", "%Y-%m-%d %H:%M:%S")
-int_to_bcd = lambda v: ((v // 10) << 4) | (v % 10)
-
-bus = smbus2.SMBus(int("$I2C_BUS"))
-DS3231_ADDR = int("$DS3231_ADDR", 16)
-
-data = [
-    int_to_bcd(rtc.second),
-    int_to_bcd(rtc.minute),
-    int_to_bcd(rtc.hour),
-    int_to_bcd((rtc.isoweekday() % 7) + 1),
-    int_to_bcd(rtc.day),
-    int_to_bcd(rtc.month),
-    int_to_bcd(rtc.year - 2000)
-]
-bus.write_i2c_block_data(DS3231_ADDR, 0x00, data)
-bus.close()
-EOF
-        then
-            log "DS3231 time set to: $current_time"
-            return
-        else
-            log "DS3231 write failed on attempt $write_attempts."
-            if [ $write_attempts -lt $max_retries ]; then
-                if _yesno "Seeding failed. Retry write?" ; then
-                    :
-                else
-                    log "User aborted DS3231 seeding during write."
-                    echo "Automatic DS3231 RTC Failed!! Please manually seed the DS3231 RTC before running Docker Compose!!"
-                    return
-                fi
-            fi
-            write_attempts=$((write_attempts+1))
-            sleep 2
-        fi
-    done
-
-    log "Exceeded maximum retries ($max_retries) for DS3231 seeding."
-    echo "Automatic DS3231 RTC Failed!! Please manually seed the DS3231 RTC before running Docker Compose!!"
-}
-
 configure_access_key() {
     local k1 k2
     while true; do
@@ -810,8 +722,6 @@ prompt_ftp_pass
 configure_ftp_pass_in_env
 
 install_smbus2
-seed_ds3231
-sync_wittypi5_rtc_from_system
 configure_access_key
 onboard_device || log "Onboarding did not complete successfully; continuing setup."
 
