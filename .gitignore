@@ -3,6 +3,15 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 
+# Docs build output (served from gh-pages branch)
+site/
+
+# Local archive directories
+archive/
+
+# Workspace files
+*.code-workspace
+
 # User-specific files
 *.rsuser
 *.suo

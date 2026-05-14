@@ -1,4 +1,4 @@
-![image](https://zenodo.org/records/17547596/files/SPARROW-banner.png)
+![SPARROW — Solar-Powered Acoustic and Remote Recording Observation Watch, edge AI for wildlife monitoring](https://zenodo.org/records/17547596/files/SPARROW-banner.png)
  
   </a>
 </p>
@@ -28,6 +28,20 @@ The resulting critical information is then transmitted via low-Earth orbit satel
 <!-- This section has the latex citation 
 To learn more about project SPARROW, please checkout our SPARROW paper here 👉 [aka.ms/sparrowpaper](https://aka.ms/sparrowpaper)-->
 
+---
+
+## Part of the Microsoft Biodiversity Ecosystem
+
+| Repository | Description |
+|---|---|
+| [microsoft/Biodiversity](https://github.com/microsoft/Biodiversity) | Umbrella hub — PyTorch-Wildlife, MegaDetector, ecosystem overview |
+| [microsoft/MegaDetector](https://github.com/microsoft/MegaDetector) | Animal/human/vehicle detector for camera traps |
+| [microsoft/Pytorch-Wildlife](https://github.com/microsoft/Pytorch-Wildlife) | Unified AI framework: detection + species classification |
+| [microsoft/SPARROW](https://github.com/microsoft/SPARROW) | This repo — solar-powered edge AI for wildlife monitoring |
+| [microsoft/SPARROW-Studio](https://github.com/microsoft/SPARROW-Studio) | Dashboard for SPARROW data visualization |
+
+---
+
 # ✨ Key Features
 
 1. **🔋 Autonomous operation**  
@@ -37,7 +51,7 @@ To learn more about project SPARROW, please checkout our SPARROW paper here 👉
    Camera traps, acoustic monitoring, and environmental sensors - SPARROW integrates multi-modal sensing to capture images, sounds, and enviromental metrics for comprehensive biodiversity monitoring.
 
 3. **🧠 On-device AI**  
-   Runs optimized PyTorch Wildlife models on power efficient edge GPUs (e.g., Jetson Orin Nano) for real-time image and acoustic detection, species classification, and event recognition.
+   Runs optimized PyTorch-Wildlife models on power efficient edge GPUs (e.g., Jetson Orin Nano) for real-time image and acoustic detection, species classification, and event recognition.
 
 4. **🌐 Global connectivity**  
    Even in the most remote ecosystems, SPARROW maintains a link to the cloud or on-premise infrastructure through low-Earth-orbit satellites, ensuring that vital conservation data reaches researchers in near real time.
