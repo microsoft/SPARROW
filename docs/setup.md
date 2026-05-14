@@ -1,50 +1,145 @@
 ---
-description: "SPARROW software setup — Docker installation, environment configuration, and one-click Jetson deploy script for edge wildlife monitoring."
+description: "SPARROW software setup — one-click Jetson setup script, Docker Compose architecture, NVIDIA Triton inference server, MegaDetector ONNX models, and SPARROW dashboard configuration."
 tags:
   - SPARROW
   - software-setup
   - docker
   - jetson
+  - triton-inference-server
+  - megadetector
+  - onnx
   - installation
 ---
 
 # Software Setup
 
-SPARROW runs entirely in Docker containers. This page covers how to configure and launch the SPARROW software stack on a Jetson Orin Nano.
+SPARROW runs entirely in Docker containers orchestrated by Docker Compose. This page covers how to configure and launch the SPARROW software stack on a Jetson Orin Nano.
+
+---
 
 ## Prerequisites
 
-- Jetson Orin Nano with JetPack 6.x installed
-- Docker and Docker Compose installed (included in the one-click setup script)
-- Starlink modem connected and configured
+- Jetson Orin Nano with **JetPack 6.x** installed and flashed
 - Hardware assembled per the [Hardware Setup](hardware.md) guide
+- SPARROW dashboard account and access key — register at [dashboard.sparrow-earth.com](https://dashboard.sparrow-earth.com/)
+
+---
+
+## One-Click Setup (Recommended)
+
+The `sparrow_setup.sh` script in the `setup script/` directory automates the entire Jetson configuration in a single command.
+
+**Run from `~/Desktop`:**
+
+```bash
+cd ~/Desktop
+sudo chmod +x sparrow_setup.sh
+sudo ./sparrow_setup.sh
+```
+
+### What the script does
+
+| Step | Action |
+|---|---|
+| **1. Prerequisites** | Installs `docker`, `docker-compose`, `git`, `curl`, `wget`, `uuidgen`, `smbus2` |
+| **2. Device identity** | Generates `/etc/unique_id` (UUID) if missing |
+| **3. Folder layout** | Creates `~/Desktop/system/` with all required directories (see below) |
+| **4. Models** | Downloads three default ONNX models from Zenodo; writes Triton `config.pbtxt` |
+| **5. Access key** | Prompts for your SPARROW dashboard access key; writes to `sparrow/config/access_key.txt` and `starlink/config/access_key.txt` |
+| **6. RTC seeding** | Gets UTC from WorldClock API (fallback: NTP) and writes to DS3231 RTC over I²C bus 7 |
+| **7. Wi-Fi hotspot** | Configures a persistent `NetworkManager` hotspot on the Jetson for camera trap connectivity |
+| **8. Docker build + launch** | Builds images with BuildKit (no cache), runs `docker-compose up -d`, tails logs |
+
+### Deployed folder structure
+
+```
+~/Desktop/system/
+├── docker-compose.yml
+├── sparrow_setup.sh
+├── Models/
+│   └── tritonserver/
+│       └── model_repository/
+│           ├── megadetectorv6/          ← MegaDetector v6 ONNX
+│           │   ├── 1/model.onnx
+│           │   └── config.pbtxt
+│           ├── AI4GAmazonClassification/ ← Amazon species classifier ONNX
+│           │   ├── 1/model.onnx
+│           │   └── config.pbtxt
+│           └── megadetector_birds_v1/   ← Bird detector ONNX
+│               ├── 1/model.onnx
+│               └── config.pbtxt
+├── sparrow/
+│   ├── Dockerfile
+│   ├── config/access_key.txt
+│   ├── images/
+│   ├── recordings/
+│   ├── logs/
+│   └── static/data/ static/gallery/
+└── starlink/
+    ├── Dockerfile.starlink
+    ├── config/access_key.txt
+    └── logs/
+```
+
+---
+
+## AI Models
+
+SPARROW uses NVIDIA Triton Inference Server to run ONNX models on the Jetson's GPU. Three models are deployed by default:
+
+| Model | Purpose |
+|---|---|
+| `megadetectorv6` | Detects animals, people, and vehicles in camera trap images ([MegaDetector](https://github.com/microsoft/MegaDetector)) |
+| `AI4GAmazonClassification` | Species classification for Amazon Basin wildlife |
+| `megadetector_birds_v1` | Bird-specific detector optimized for acoustic + visual monitoring |
+
+All models are downloaded as ONNX format and served via Triton's gRPC/HTTP endpoints on ports 8000–8002.
+
+---
+
+## Docker Services
+
+Two containers run on the Jetson:
+
+### `sparrow`
+
+The main SPARROW service — handles:
+- **Camera trap management** — WiFi camera polling, image download, deduplication
+- **On-device inference** — submits images to Triton for MegaDetector detection + species classification
+- **Power management** — monitors solar charge controller, battery state, dynamic component scheduling
+- **Telemetry** — environmental sensor readings (BME688, SHTC3), system health metrics
+- **Data sync** — FTP/HTTP upload to SPARROW dashboard when connectivity is available
+- **Privacy scrubbing** — removes human-related images before upload
+
+### `starlink`
+
+Monitors Starlink satellite connectivity via gRPC, logs signal metrics, and triggers data sync when uplink is available.
+
+---
 
 ## Environment Configuration
 
-Copy the environment templates and fill in your deployment-specific values:
+The `sparrow.env` and `starlink.env` files in the repo root are **configuration templates**. The setup script fills in deployment-specific values (access key, FTP password). Key variables:
 
-```bash
-cp sparrow.env .env.sparrow
-cp starlink.env .env.starlink
-```
-
-Edit `.env.sparrow` and `.env.starlink` with your site-specific configuration (coordinates, upload endpoints, API keys, etc.).
+| Variable | Purpose |
+|---|---|
+| `SERVER_BASE_URL` | SPARROW dashboard API endpoint |
+| `FTP_PASS` | FTP upload credential (prompted during setup) |
+| `UNIQUE_ID_PATH` | Path to device UUID (`/host/etc/unique_id`) |
 
 !!! warning
-    Never commit `.env` files containing real credentials. The `.gitignore` already excludes `.env` files.
+    Never commit `.env` files containing real credentials. The `.gitignore` already excludes all `.env` files.
 
-## Docker Compose Launch
+---
 
-Start the full SPARROW stack:
+## Manual Launch (Advanced)
+
+To launch without the setup script (assumes folder structure already exists):
 
 ```bash
+cd ~/Desktop/system
 docker compose up -d
 ```
-
-This launches two services defined in `docker-compose.yml`:
-
-- **sparrow** — camera trap capture, on-device AI inference (PyTorch-Wildlife), data management, power control, telemetry
-- **starlink** — Starlink satellite connectivity monitoring and data uplink
 
 View logs:
 
@@ -52,22 +147,17 @@ View logs:
 docker compose logs -f
 ```
 
-## One-Click Jetson Setup
-
-For a fresh Jetson deployment, use the automated setup script in `setup script/`:
+Restart a specific service:
 
 ```bash
-cd "setup script"
-./setup.sh
+docker compose restart sparrow
 ```
 
-This script handles all steps from OS configuration through Docker launch. See the [Assembly and Setup Guide PDF](https://github.com/microsoft/SPARROW/blob/main/documentation/SPARROW_Assembly_and_Setup_Guide.pdf) for full details on each step.
+---
 
-## Dependencies
+## SPARROW Dashboard
 
-Python dependencies are organized per service:
+Data collected and processed by SPARROW is uploaded to the [SPARROW Dashboard](https://dashboard.sparrow-earth.com/) for visualization, filtering, and export.
 
-- `sparrow/requirements.txt` — AI/ML stack (torch, torchvision, librosa, etc.)
-- `starlink/requirements.txt` — Starlink gRPC interface
-
-These are installed inside their respective Docker images — no manual `pip install` needed on the host.
+- Register for an account and obtain your access key at [dashboard.sparrow-earth.com](https://dashboard.sparrow-earth.com/)
+- Dashboard Terms & Conditions: [sparrow-earth.com/agreement](https://dev.sparrow-earth.com/agreement)
