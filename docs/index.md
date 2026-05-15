@@ -99,3 +99,4 @@ All services run in Docker containers on the Jetson, orchestrated by Docker Comp
 | [microsoft/MegaDetector-Sonar](https://github.com/microsoft/MegaDetector-Sonar) | Sonar-based wildlife detection for aquatic monitoring |
 | [microsoft/MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier) | Camera-trap species classification fine-tuning — adapt classifiers to your own datasets and geographic regions |
 | [microsoft/SPARROW](https://github.com/microsoft/SPARROW) | This repo — solar-powered edge AI for wildlife monitoring |
+| SPARROW Studio | Desktop application for all AI for Good Lab models |
