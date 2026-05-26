@@ -70,12 +70,18 @@ except Exception:
     logger.critical("Cannot proceed without a valid unique_id.")
     exit(1)
 
-# VE.Direct (Solar)
+# VE.Direct (Solar). Use a Victron-specific by-id symlink so this never grabs
+# the XBee FTDI adapter. When the VE.Direct cable isn't plugged in, the symlink
+# wont exist and serial.Serial raises FileNotFoundError, falling into ved=None.
+VE_DIRECT_PORT = os.environ.get(
+    "VE_DIRECT_PORT",
+    "/dev/serial/by-id/usb-VictronEnergy_VE.Direct_cable-if00-port0",
+)
 try:
-    ved = serial.Serial("/dev/ttyUSB0", 19200, timeout=1)
-    logger.info("Opened VE.Direct on /dev/ttyUSB0")
+    ved = serial.Serial(VE_DIRECT_PORT, 19200, timeout=1)
+    logger.info(f"Opened VE.Direct on {VE_DIRECT_PORT}")
 except Exception as e:
-    logger.error(f"Could not open VE.Direct port: {e}")
+    logger.error(f"Could not open VE.Direct port {VE_DIRECT_PORT}: {e}")
     ved = None
 
 # Helper Functions

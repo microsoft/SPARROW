@@ -17,9 +17,10 @@ services:
       - /sys:/host/sys:ro
       - /proc:/host/proc:ro
       - /etc/unique_id:/host/etc/unique_id:ro
+      - /dev/serial:/dev/serial:ro
       - ./Models/tritonserver/model_repository:/home/sparrow/Desktop/system/Models/tritonserver/model_repository
     devices:
-      - /dev/ttyUSB0:/dev/ttyUSB0
+      - /dev/serial/by-id/usb-FTDI_FT231X_USB_UART_DU0D4EKZ-if00-port0:/dev/xbee_serial
     privileged: true
     restart: unless-stopped
 
