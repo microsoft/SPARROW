@@ -145,7 +145,7 @@ SPARROW Assembly and Set-Up Guide © 2025 by Microsoft is licensed under MIT.
 
 ## ⚡ 2. One-click Jetson Setup (Recommended)
 
-The repo contains a Jetson configuration script `sparrow_setup.sh` that installs prerequisites, prepares folders, downloads default Triton models, seeds the DS3231 RTC, configures Wi-Fi hotspot, and launches the SPARROW services.
+The repo contains a Jetson configuration script `sparrow_setup.sh` that installs prerequisites, prepares folders, downloads default Triton models, configures Wi-Fi hotspot, and launches the SPARROW services.
 
 To send data to the SPARROW dashboard you will need to pair it with your account.  
 To create an account and obtain an access key visit:  
@@ -218,6 +218,20 @@ Creates `~/Desktop/system` with:
 ### 4️⃣ Models + Configs
 Downloads three default ONNX models from Zenodo and writes minimal `config.pbtxt` for each Triton repo.
 
+### 🔧 XBee Radio Config (ROBIN deployments only)
+If you answer **yes** to "Is ROBIN being used?", the script auto-detects the FTDI XBee adapter on `/dev/serial/by-id/` and runs `xbee_configure.py` once over AT command mode, writing these settings to the radio's flash (persistent across reboots):
+
+| AT Register | Value | Purpose |
+|---|---|---|
+| `AP` | `1` | API mode (no escapes) — required for the framed protocol `xbee_master_collect.py` uses at runtime |
+| `CE` | `0` | Standard router — routes packets in the mesh |
+| `BR` | `1` | RF data rate 80 kbps — must match remote nodes |
+| `ID` | `1234` | Network ID — must match remote nodes (robins, camera nodes) |
+| `NI` | `SPARROW_MASTER` | Node identifier |
+| `BD` | `7` | UART baud 115200 |
+
+The radio is auto-probed across common bauds (115200, 9600, 57600, 19200, 38400, 230400) so it works whether the adapter shipped pre-configured or virgin. Settings are written with `WR`, so re-running setup is safe but unnecessary once the XBee has been provisioned.
+
 ### 5️⃣ Access Key
 Prompts for the server access key (obtained from the SPARROW dashboard) and writes it to:
 ```
@@ -225,15 +239,12 @@ sparrow/config/access_key.txt
 starlink/config/access_key.txt
 ```
 
-### 6️⃣ RTC Seeding (DS3231 over I2C bus 7)
-Gets UTC from WorldClock API (fallback: NTP or system UTC) and writes it to the RTC.
-
-### 7️⃣ Wi-Fi Hotspot
+### 6️⃣ Wi-Fi Hotspot
 Configures a persistent hotspot via NetworkManager:  
 **SSID:** `CameraTraps`  
 **Password:** `User prompted`
 
-### 8️⃣ Docker Build & Launch
+### 7️⃣ Docker Build & Launch
 Builds images with BuildKit (no cache), runs `docker-compose up -d`, and tails logs.
 
 ---
