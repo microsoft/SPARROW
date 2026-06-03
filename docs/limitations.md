@@ -38,7 +38,7 @@ A 2TB NVMe SSD buffers images and audio on the unit so it can keep working throu
 
 SPARROW is the field-hardware and data-collection layer, not a complete analysis suite. A few things sit outside its job:
 
-- **Audio analysis lives elsewhere.** SPARROW records sound with its AudioMoth sensor as a data-collection function. Analyzing and classifying that audio is the job of [MegaDetector-Acoustic](https://microsoft.github.io/MegaDetector-Acoustic/), not SPARROW.
+- **Audio analysis lives elsewhere.** SPARROW records sound with its AudioMoth sensor as a data-collection function. Analyzing and classifying that audio is the job of MegaDetector-Acoustic (documentation coming soon), not SPARROW.
 - **Detection models come from upstream.** The on-device models are built on [PyTorch-Wildlife](https://microsoft.github.io/Pytorch-Wildlife/) and [MegaDetector](https://microsoft.github.io/MegaDetector/); SPARROW packages and serves them rather than training them.
 - **Recommended hardware is validated, alternatives are not.** The assembly guide is built and tested around a specific bill of materials. Substituting components, especially generic I²C boards, can require wiring and configuration changes the documentation does not cover.
 
@@ -53,5 +53,5 @@ SPARROW is the field-hardware and data-collection layer, not a complete analysis
 SPARROW is one piece of the Microsoft AI for Good Lab biodiversity toolkit, gathered under the [Microsoft Biodiversity hub](https://microsoft.github.io/Biodiversity/).
 
 - **[MegaDetector](https://microsoft.github.io/MegaDetector/)**: camera-trap detection for the images SPARROW captures.
-- **[MegaDetector-Acoustic](https://microsoft.github.io/MegaDetector-Acoustic/)**: the owner of audio analysis and classification.
+- **MegaDetector-Acoustic (documentation coming soon)**: the owner of audio analysis and classification.
 - **[PyTorch-Wildlife](https://microsoft.github.io/Pytorch-Wildlife/)**: the model framework SPARROW deploys at the edge.

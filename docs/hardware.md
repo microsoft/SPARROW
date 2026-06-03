@@ -121,12 +121,12 @@ For detailed instructions with photos and wiring diagrams, see the [SPARROW Asse
 Once hardware is assembled, proceed to [Software Setup](setup.md). To plan where and how to install the finished unit, see the [field deployment guide](field-deployment.md), and review the [limitations and field considerations](limitations.md) before committing a site.
 
 !!! note "AudioMoth here is for capture, not analysis"
-    The AudioMoth sensor is part of SPARROW's data-collection hardware. Analyzing and classifying the recorded audio is handled by [MegaDetector-Acoustic](https://microsoft.github.io/MegaDetector-Acoustic/), not by SPARROW.
+    The AudioMoth sensor is part of SPARROW's data-collection hardware. Analyzing and classifying the recorded audio is handled by MegaDetector-Acoustic (documentation coming soon), not by SPARROW.
 
 ## Related Microsoft biodiversity AI projects
 
 SPARROW is the field-hardware layer of an open-source biodiversity toolkit from the Microsoft AI for Good Lab; the [Microsoft Biodiversity hub](https://microsoft.github.io/Biodiversity/) connects the projects below.
 
 - **[MegaDetector](https://microsoft.github.io/MegaDetector/)**: the camera-trap detection model SPARROW runs on the Jetson.
-- **[MegaDetector-Acoustic](https://microsoft.github.io/MegaDetector-Acoustic/)**: analyzes and classifies the audio SPARROW captures in the field.
+- **MegaDetector-Acoustic (documentation coming soon)**: analyzes and classifies the audio SPARROW captures in the field.
 - **[PyTorch-Wildlife](https://microsoft.github.io/Pytorch-Wildlife/)**: the AI framework whose models SPARROW packages for edge inference.

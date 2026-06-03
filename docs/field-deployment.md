@@ -70,5 +70,5 @@ Once a unit is live, most operation is hands-off, but a few things are worth pla
 SPARROW is part of an open-source biodiversity toolkit from the Microsoft AI for Good Lab; the [Microsoft Biodiversity hub](https://microsoft.github.io/Biodiversity/) is the umbrella for the projects below.
 
 - **[MegaDetector](https://microsoft.github.io/MegaDetector/)**: the camera-trap detection model SPARROW runs on captured images in the field.
-- **[MegaDetector-Acoustic](https://microsoft.github.io/MegaDetector-Acoustic/)**: handles analysis and classification of the audio SPARROW records.
+- **MegaDetector-Acoustic (documentation coming soon)**: handles analysis and classification of the audio SPARROW records.
 - **[PyTorch-Wildlife](https://microsoft.github.io/Pytorch-Wildlife/)**: the framework supplying SPARROW's on-device wildlife models.

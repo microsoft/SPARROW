@@ -63,5 +63,5 @@ SPARROW serves wildlife models built on [PyTorch-Wildlife](https://github.com/mi
 SPARROW is the field-hardware layer of a larger open-source toolkit from the Microsoft AI for Good Lab. The [Microsoft Biodiversity hub](https://microsoft.github.io/Biodiversity/) ties the ecosystem together.
 
 - **[MegaDetector](https://microsoft.github.io/MegaDetector/)**: the camera-trap detector that locates animals, people, and vehicles in images; SPARROW runs it on-device.
-- **[MegaDetector-Acoustic](https://microsoft.github.io/MegaDetector-Acoustic/)**: the project that analyzes and classifies audio recordings; SPARROW collects sound in the field and leaves audio classification to it.
+- **MegaDetector-Acoustic (documentation coming soon)**: the project that analyzes and classifies audio recordings; SPARROW collects sound in the field and leaves audio classification to it.
 - **[PyTorch-Wildlife](https://microsoft.github.io/Pytorch-Wildlife/)**: the AI framework whose detection and classification models SPARROW packages for the edge.
