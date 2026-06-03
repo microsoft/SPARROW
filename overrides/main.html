@@ -30,6 +30,7 @@
   <meta name="twitter:title" content="{{ social_title | striptags }}">
   <meta name="twitter:description" content="{{ social_desc | striptags }}">
   <meta name="twitter:image" content="{{ config.site_url }}assets/cat.png">
+  <meta name="twitter:image:alt" content="SPARROW: solar-powered edge AI device for biodiversity monitoring by Microsoft AI for Good Lab">
   {#- TODO(design): swap in a 1200x630 banner + add og:image:width/height when delivered -#}
 
   {%- if page and page.file and page.file.src_path == "index.md" %}
@@ -42,8 +43,9 @@
         "@id": config.site_url ~ "#website",
         "url": config.site_url,
         "name": config.site_name,
+        "inLanguage": "en",
         "description": config.site_description,
-        "publisher": { "@id": config.site_url ~ "#publisher" }
+        "publisher": { "@id": "https://www.microsoft.com/en-us/ai/ai-for-good#organization" }
       },
       {
         "@type": "SoftwareSourceCode",
@@ -57,14 +59,14 @@
         "runtimePlatform": "NVIDIA Jetson",
         "isAccessibleForFree": true,
         "license": "https://github.com/microsoft/SPARROW/blob/main/LICENSE",
-        "creator": { "@id": config.site_url ~ "#publisher" },
-        "maintainer": { "@id": config.site_url ~ "#publisher" },
+        "creator": { "@id": "https://www.microsoft.com/en-us/ai/ai-for-good#organization" },
+        "maintainer": { "@id": "https://www.microsoft.com/en-us/ai/ai-for-good#organization" },
         "sameAs": ["https://github.com/microsoft/SPARROW"],
         "keywords": ["SPARROW", "edge AI biodiversity", "solar powered camera trap", "NVIDIA Jetson camera trap", "Starlink wildlife", "remote wildlife monitoring", "bioacoustic edge device"]
       },
       {
         "@type": "Organization",
-        "@id": config.site_url ~ "#publisher",
+        "@id": "https://www.microsoft.com/en-us/ai/ai-for-good#organization",
         "name": "Microsoft AI for Good Lab",
         "url": "https://www.microsoft.com/en-us/ai/ai-for-good"
       }
