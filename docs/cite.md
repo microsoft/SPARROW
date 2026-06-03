@@ -1,5 +1,5 @@
 ---
-description: "How to cite SPARROW — software citation and BibTeX entry for the SPARROW edge AI wildlife monitoring system by Microsoft AI for Good Lab."
+description: "How to cite SPARROW: software citation and BibTeX entry for the SPARROW edge AI wildlife monitoring system by Microsoft AI for Good Lab."
 tags:
   - SPARROW
   - citation

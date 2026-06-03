@@ -1,5 +1,5 @@
 ---
-description: "SPARROW software setup — one-click Jetson setup script, Docker Compose architecture, NVIDIA Triton inference server, MegaDetector ONNX models, and SPARROW dashboard configuration."
+description: "SPARROW software setup: one-click Jetson setup script, Docker Compose architecture, NVIDIA Triton inference server, MegaDetector ONNX models, and SPARROW dashboard configuration."
 tags:
   - SPARROW
   - software-setup
@@ -13,7 +13,7 @@ tags:
 
 # Software Setup
 
-SPARROW runs entirely in Docker containers orchestrated by Docker Compose. This page covers how to configure and launch the SPARROW software stack on a Jetson Orin Nano.
+SPARROW runs entirely in Docker containers orchestrated by Docker Compose. This page covers how to configure and launch the SPARROW software stack on a Jetson Orin Nano. For the design rationale behind running the AI on-device, see [edge AI biodiversity monitoring](edge-ai-wildlife-monitoring.md).
 
 ---
 
@@ -21,7 +21,7 @@ SPARROW runs entirely in Docker containers orchestrated by Docker Compose. This 
 
 - Jetson Orin Nano with **JetPack 6.x** installed and flashed
 - Hardware assembled per the [Hardware Setup](hardware.md) guide
-- SPARROW dashboard account and access key — register at [dashboard.sparrow-earth.com](https://dashboard.sparrow-earth.com/)
+- SPARROW dashboard account and access key: register at [dashboard.sparrow-earth.com](https://dashboard.sparrow-earth.com/)
 
 ---
 
@@ -103,13 +103,13 @@ Two containers run on the Jetson:
 
 ### `sparrow`
 
-The main SPARROW service — handles:
-- **Camera trap management** — WiFi camera polling, image download, deduplication
-- **On-device inference** — submits images to Triton for MegaDetector detection + species classification
-- **Power management** — monitors solar charge controller, battery state, dynamic component scheduling
-- **Telemetry** — environmental sensor readings (BME688, SHTC3), system health metrics
-- **Data sync** — FTP/HTTP upload to SPARROW dashboard when connectivity is available
-- **Privacy scrubbing** — removes human-related images before upload
+The main SPARROW service handles:
+- **Camera trap management**: WiFi camera polling, image download, deduplication
+- **On-device inference**: submits images to Triton for MegaDetector detection + species classification
+- **Power management**: monitors solar charge controller, battery state, dynamic component scheduling
+- **Telemetry**: environmental sensor readings (BME688, SHTC3), system health metrics
+- **Data sync**: FTP/HTTP upload to SPARROW dashboard when connectivity is available
+- **Privacy scrubbing**: removes human-related images before upload
 
 ### `starlink`
 
@@ -161,3 +161,9 @@ Data collected and processed by SPARROW is uploaded to the [SPARROW Dashboard](h
 
 - Register for an account and obtain your access key at [dashboard.sparrow-earth.com](https://dashboard.sparrow-earth.com/)
 - Dashboard Terms & Conditions: [sparrow-earth.com/agreement](https://dev.sparrow-earth.com/agreement)
+
+---
+
+## Next Steps
+
+With the software running, plan the physical install with the [field deployment guide](field-deployment.md), and review the [limitations and field considerations](limitations.md) for the power, connectivity, and storage trade-offs of a remote deployment.
