@@ -9,8 +9,9 @@ copyright: Copyright (c) 2023 Microsoft Corporation
 
 theme:
   name: material
-  favicon: https://zenodo.org/records/15376499/files/cat.png
-  logo: https://zenodo.org/records/15376499/files/cat.png
+  custom_dir: overrides
+  favicon: assets/cat.png
+  logo: assets/cat.png
   icon:
     menu: material/menu
     alternate: material/translate
@@ -99,6 +100,11 @@ markdown_extensions:
       pygments_lang_class: true
 
 plugins:
+  - callouts
   - search
   - meta
   - tags
+  - git-revision-date-localized:
+      type: date
+      enable_creation_date: true
+      fallback_to_build_date: true
