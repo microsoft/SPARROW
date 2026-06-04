@@ -1,6 +1,6 @@
 site_name: SPARROW
 site_url: https://microsoft.github.io/SPARROW/
-site_description: "SPARROW — Solar-Powered Acoustic and Remote Recording Observation Watch. AI-powered edge computing for wildlife monitoring by Microsoft AI for Good Lab."
+site_description: "SPARROW: Solar-Powered Acoustic and Remote Recording Observation Watch. AI-powered edge computing for wildlife monitoring by Microsoft AI for Good Lab."
 docs_dir: docs
 site_dir: site
 repo_url: https://github.com/microsoft/SPARROW
@@ -72,8 +72,11 @@ theme:
 nav:
   - SPARROW:
     - Overview: index.md
-    - Hardware Setup: hardware.md
+    - Edge AI Biodiversity Monitoring: edge-ai-wildlife-monitoring.md
+    - Hardware & Architecture: hardware.md
+    - Field Deployment Guide: field-deployment.md
     - Software Setup: setup.md
+    - Limitations: limitations.md
     - Tags: tags.md
   - Cite Us: cite.md
   - Developer Guide: build_mkdocs.md

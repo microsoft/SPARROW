@@ -7,7 +7,7 @@ tags:
   - developer-guide
 ---
 
-# Developer Guide — Building the Docs
+# Developer Guide: Building the Docs
 
 This page explains how to build and preview the SPARROW documentation site locally.
 
@@ -37,7 +37,7 @@ To build the static site without serving it:
 mkdocs build
 ```
 
-Output goes to `site/` (gitignored — never commit this directory).
+Output goes to `site/` (gitignored, never commit this directory).
 
 ## Deploy to GitHub Pages
 
