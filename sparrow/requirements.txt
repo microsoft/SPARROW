@@ -1,7 +1,7 @@
 aiosmtpd==1.4.6
 requests==2.33.0
-urllib3==2.6.3
-idna==3.7
+urllib3==2.7.0
+idna==3.15
 charset-normalizer==3.3.2
 certifi==2024.7.4
 schedule==1.2.2
@@ -10,14 +10,13 @@ filelock==3.20.3
 smbus2==0.4.1
 pyserial==3.5
 tqdm==4.66.5
-Pillow==10.4.0
+Pillow==12.2.0
 numpy==1.26.4
 pandas==1.4.4
 torch==2.8.0
 torchvision==0.23.0
 torchaudio==2.8.0
-tritonclient[http]==2.26.0
-protobuf==4.25.8
+protobuf==5.29.6
 soundfile==0.12.1
 audioread==3.0.1
 pooch==1.8.2
