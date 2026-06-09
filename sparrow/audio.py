@@ -173,9 +173,10 @@ except Exception as e:
 
 def fetch_settings(unique_id):
     payload = {"unique_id": unique_id, "auth_key": AUTH_KEY}
+    headers = {"X-API-Key": AUTH_KEY, "X-Unit-ID": unique_id}
     try:
         logger.info("Attempting to fetch audio settings from the server.")
-        response = requests.post(SERVER_URL, json=payload, timeout=10)
+        response = requests.post(SERVER_URL, json=payload, headers=headers, timeout=10)
         if response.status_code == 200:
             server_settings = response.json()
             logger.info(f"Audio settings retrieved from server: {server_settings}")

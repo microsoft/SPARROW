@@ -39,6 +39,7 @@ services:
       - /sys:/host/sys:ro
       - /proc:/host/proc:ro
       - /etc/unique_id:/host/etc/unique_id:ro
+      - /dev/serial:/dev/serial:ro
     privileged: true
     restart: unless-stopped
 

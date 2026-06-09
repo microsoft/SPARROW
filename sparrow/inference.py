@@ -159,7 +159,11 @@ def save_model_config(config):
 def fetch_model_settings(unique_id, auth_key):
     """Fetch updated model settings from server; update local file if changed."""
     payload = {"unique_id": unique_id, "auth_key": auth_key}
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "X-API-Key": auth_key,
+        "X-Unit-ID": unique_id,
+    }
     try:
         response = requests.post(MODEL_ENDPOINT, json=payload, headers=headers, timeout=10)
         if response.status_code == 200:

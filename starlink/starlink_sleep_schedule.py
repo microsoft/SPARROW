@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
 Manages Starlink power on a Raspberry Pi using a GPIO relay: it fetches a
-sleep/wake window from the server, reads battery voltage via VE.Direct (/dev/ttyUSB0),
-and toggles power accordingly. It avoids cutting power during Starlink updates
-(using gRPC status + optional reboot to install).
+sleep/wake window from the server, reads battery voltage via VE.Direct, and
+toggles power accordingly. It avoids cutting power during Starlink updates
+(using gRPC status + optional reboot to install). The VE.Direct port is read
+from the VE_DIRECT_PORT env var, defaulting to the Victron-specific by-id
+symlink so it can't collide with the XBee FTDI adapter on /dev/ttyUSB0.
 """
 
 import os
@@ -31,7 +33,10 @@ except Exception:
     GPIO = None
 
 # VE.Direct / Paths
-VE_DIRECT_PORT = "/dev/ttyUSB0"
+VE_DIRECT_PORT = os.environ.get(
+    "VE_DIRECT_PORT",
+    "/dev/serial/by-id/usb-VictronEnergy_VE.Direct_cable-if00-port0",
+)
 
 CONFIG_PATH = "/app/config/schedule_config.json"
 LOG_DIR = "/app/logs"
@@ -329,7 +334,11 @@ def fetch_remote_schedule(unique_id):
     """Fetch the schedule from the REST API."""
     try:
         payload = {"unique_id": unique_id, "auth_key": AUTH_KEY}
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+            "X-API-Key": AUTH_KEY,
+            "X-Unit-ID": unique_id,
+        }
         logger.info(f"Fetching remote schedule for {unique_id}")
         response = requests.post(REST_API_URL, json=payload, headers=headers, timeout=10)
         if response.status_code == 200:
