@@ -674,6 +674,24 @@ onboard_device() {
 }
 
 ###############################################################################
+# Auto-updater
+###############################################################################
+install_auto_updater() {
+    local installer="$SYSTEM_FOLDER/updater/install.sh"
+    if [[ ! -f "$installer" ]]; then
+        _error "Auto-updater installer not found at $installer; skipping."
+        return 1
+    fi
+    log "Installing SPARROW auto-updater (systemd timer, every 15 min, tag-based)..."
+    if bash "$installer"; then
+        log "Auto-updater installed and enabled."
+    else
+        _error "Auto-updater install failed; continuing setup. Re-run manually: sudo bash $installer"
+        return 1
+    fi
+}
+
+###############################################################################
 # MAIN
 ###############################################################################
 [ "$EUID" -eq 0 ] || { _error "Run as root (sudo)."; exit 1; }
@@ -756,6 +774,10 @@ if $GUI && command -v zenity >/dev/null; then
 else
     _progress "Starting Sparrow.." docker_compose_cmd up -d
     log "Sparrow containers started"
+fi
+
+if _yesno "Enable auto-update from GitHub tags (recommended for field deployments)?"; then
+    install_auto_updater || log "Auto-updater install did not complete; continuing."
 fi
 
 log "Tailing Sparrow logs (Ctrl-C to exit)..."
