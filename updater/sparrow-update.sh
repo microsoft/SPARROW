@@ -143,11 +143,14 @@ fetch_latest_matching_tag() {
         log WARN "failed to query $api_url (network or auth issue)"
         return 1
     fi
-    # Tags are returned newest-first by the GitHub API. Pick the first matching one.
-    # If no match, jq's `first` yields null and string interpolation gives "null\tnull",
-    # which the caller treats as "no match".
+    # GitHub's tag-order isn't reliable for our purposes (creation time vs
+    # name vs descending varies). Sort lexicographically ourselves and take
+    # the highest — this gives the natural ordering
+    #   v2026.06.09 < v2026.06.09-hotfix1 < v2026.06.10
+    # which is what we want. If no match, jq's `last` yields null and string
+    # interpolation gives "null\tnull", which the caller treats as "no match".
     jq -r --arg pat "$TAG_PATTERN" \
-        '[.[] | select(.name | test($pat))] | first | "\(.name)\t\(.commit.sha)"' \
+        '[.[] | select(.name | test($pat))] | sort_by(.name) | last | "\(.name)\t\(.commit.sha)"' \
         <<<"$body"
 }
 
