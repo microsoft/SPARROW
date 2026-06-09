@@ -193,7 +193,8 @@ validate_compose() {
 }
 
 snapshot_to_backup() {
-    local tag="$1" target="$BACKUP_DIR/$tag"
+    local tag="$1"
+    local target="$BACKUP_DIR/$tag"
     rm -rf "$target"
     mkdir -p "$target"
     rsync -a --delete "${PRESERVE_EXCLUDES[@]}" "$DEPLOY_DIR/" "$target/"
@@ -206,7 +207,8 @@ apply_release() {
 }
 
 restore_backup() {
-    local tag="$1" src="$BACKUP_DIR/$tag"
+    local tag="$1"
+    local src="$BACKUP_DIR/$tag"
     [[ -d "$src" ]] || die "no backup to restore at $src"
     rsync -a --delete "${PRESERVE_EXCLUDES[@]}" "$src/" "$DEPLOY_DIR/"
     log INFO "restored backup: $src"
