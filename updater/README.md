@@ -27,25 +27,31 @@ cd /home/sparrow/Desktop/system
 sudo bash updater/install.sh
 ```
 
-The installer prompts once for a **GitHub fine-grained PAT** (required while
-the repo is private; leave blank when it goes public). The PAT needs only
-`Contents: read-only` on `Clamps251/sparrow-pi`. It's saved to
-`/etc/sparrow-update.conf` (mode 0600) and read on every update tick.
+That's it — no prompts, no config. The installer works against a public
+GitHub repo out of the box.
 
-The installer is safe to re-run; if `/etc/sparrow-update.conf` already exists
-it is left alone.
+### Optional: private repo / auth
 
-To change the token later, edit the file by hand:
+While `Clamps251/sparrow-pi` is still private, the updater needs a GitHub
+fine-grained PAT (scoped to *Contents: Read-only* on this one repo). Pass it
+through to the installer via env var:
+
+```bash
+sudo env UPDATER_GITHUB_TOKEN=github_pat_xxx bash updater/install.sh
+```
+
+It will land in `/etc/sparrow-update.conf` (mode 0600) and the updater will
+read it on every tick. To change the token later, edit that file by hand:
 
 ```bash
 sudo nano /etc/sparrow-update.conf
 sudo systemctl start sparrow-update.service   # verify it works now
 ```
 
-For unattended installs, pass the token via env var:
+Once the repo is public, no token is needed — you can delete the file:
 
 ```bash
-sudo env UPDATER_GITHUB_TOKEN=ghp_xxx bash updater/install.sh
+sudo rm /etc/sparrow-update.conf
 ```
 
 ## Tagging a release

@@ -36,34 +36,23 @@ if [[ ! -f "$SOURCE_SCRIPT" ]]; then
     exit 1
 fi
 
-# Token can be passed via env (UPDATER_GITHUB_TOKEN=...) for unattended installs,
-# or via stdin prompt. Skip prompt entirely if the config file already exists.
-if [[ ! -f "$CONFIG_FILE" ]]; then
-    echo "[install] writing $CONFIG_FILE (mode 0600)"
-    token="${UPDATER_GITHUB_TOKEN:-}"
-    if [[ -z "$token" ]]; then
-        # tty-detect to skip prompt during unattended installs
-        if [[ -t 0 ]]; then
-            echo "GitHub fine-grained PAT (read-only contents on the SPARROW repo;"
-            echo "leave blank if the repo is public). Stored at $CONFIG_FILE mode 0600."
-            read -r -s -p "  token: " token
-            echo
-        fi
-    fi
+# The auto-updater works without any config for public repos. If the repo is
+# still private, set UPDATER_GITHUB_TOKEN before running this installer and we
+# will persist it to $CONFIG_FILE (mode 0600). An existing $CONFIG_FILE is
+# never overwritten — operators can edit it directly.
+if [[ -n "${UPDATER_GITHUB_TOKEN:-}" && ! -f "$CONFIG_FILE" ]]; then
+    echo "[install] writing $CONFIG_FILE from UPDATER_GITHUB_TOKEN (mode 0600)"
     umask 077
     cat > "$CONFIG_FILE" <<EOF
-# /etc/sparrow-update.conf — runtime config for the SPARROW auto-updater.
+# /etc/sparrow-update.conf — optional overrides for the SPARROW auto-updater.
 # Sourced by /usr/local/sbin/sparrow-update.sh. Treat as a secret.
-GITHUB_TOKEN="${token}"
-# Uncomment + edit to override defaults:
-#TAG_PATTERN='^v[0-9]{4}\.[0-9]{2}\.[0-9]{2}(-[A-Za-z0-9._-]+)?\$'
-#KEEP_BACKUPS=2
-#HEALTH_SLEEP_SECS=60
+GITHUB_TOKEN="${UPDATER_GITHUB_TOKEN}"
 EOF
     chmod 0600 "$CONFIG_FILE"
-    unset token
-else
+elif [[ -f "$CONFIG_FILE" ]]; then
     echo "[install] $CONFIG_FILE already exists; leaving in place"
+else
+    echo "[install] no $CONFIG_FILE created (public repo / anonymous access)"
 fi
 
 echo "[install] ensuring jq is installed"
