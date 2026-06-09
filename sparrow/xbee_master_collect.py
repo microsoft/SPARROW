@@ -188,7 +188,10 @@ def main():
     ap = argparse.ArgumentParser(description="DigiMesh master with reconnecting serial.")
     ap.add_argument("--port", required=True, help="Serial port")
     ap.add_argument("--baud", type=int, default=115200)
-    ap.add_argument("--out", default="received_images", help="Output directory")
+    ap.add_argument("--out", default="received_images", help="Output directory for images (.jpg/.jpeg/.png)")
+    ap.add_argument("--audio-out", default=None,
+                    help="Output directory for received audio (.mp3/.wav). "
+                         "Defaults to <out>/audio if not set. In production this is /app/recordings.")
     ap.add_argument("--session-timeout", type=float, default=30.0, help="Seconds before abandoning a stalled session")
     ap.add_argument("--ready-ttl", type=float, default=300.0, help="Seconds before dropping a stale RD/session")
     ap.add_argument("--max-devices", type=int, default=500, help="Safety cap for number of tracked devices")
@@ -215,6 +218,21 @@ def main():
     )
 
     os.makedirs(args.out, exist_ok=True)
+    audio_out = args.audio_out or os.path.join(args.out, "audio")
+    os.makedirs(audio_out, exist_ok=True)
+
+    # File-type routing. Robin sends `.jpg` images alongside `.mp3` audio over the
+    # same XBee link; we split them at save time so each downstream pipeline
+    # (inference.py for images, rest_client for audio) finds only what it expects.
+    IMAGE_EXTS = (".jpg", ".jpeg", ".png")
+    AUDIO_EXTS = (".mp3", ".wav")
+
+    def out_dir_for(name: str) -> str:
+        ext = os.path.splitext(name)[1].lower()
+        if ext in AUDIO_EXTS:
+            return audio_out
+        # Unknown extensions land with images so they're visible and not silently dropped.
+        return args.out
 
     dev_queues: dict[int, deque] = {}
     rr = deque()
@@ -360,7 +378,8 @@ def main():
         enqueue_ready(active["src64"], active["sid"], active.get("meta", {}))
         active = None
 
-    logger.info("MASTER start port=%s baud=%d out=%s", args.port, args.baud, os.path.abspath(args.out))
+    logger.info("MASTER start port=%s baud=%d out=%s audio_out=%s",
+                args.port, args.baud, os.path.abspath(args.out), os.path.abspath(audio_out))
     logger.info("Fairness: per-device-cap=%d coalesce-latest=%s ready-ttl=%.1fs",
                 args.per_device_cap, args.coalesce_latest, args.ready_ttl)
 
@@ -547,8 +566,9 @@ def main():
                     data = data[:st["size"]]
                     crc32 = binascii.crc32(data) & 0xFFFFFFFF
 
-                    out_name = f"{fmt64(src64_int)}_{sid:08x}_{os.path.basename(st['name'])}"
-                    out_path = os.path.join(args.out, out_name)
+                    base_name = os.path.basename(st["name"])
+                    out_name = f"{fmt64(src64_int)}_{sid:08x}_{base_name}"
+                    out_path = os.path.join(out_dir_for(base_name), out_name)
                     with open(out_path, "wb") as f:
                         f.write(data)
 

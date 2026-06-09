@@ -306,9 +306,22 @@ def upload_image_and_data(image_path, detection_data_list):
     logger.info(f"Successfully uploaded {image_name} ({len(detections)} detections)")
     return True
 
+_AUDIO_MIME_BY_EXT = {
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+}
+
+
 def upload_audio_file(audio_path):
-    """Upload a single .wav file; return True on success."""
+    """Upload a single audio file (.wav or .mp3); return True on success.
+
+    MP3s come from robin's on-device bird detector (already filtered with
+    keep_blanks=false and encoded by lameenc); WAVs come from the master's
+    own audio.py pipeline. MIME is picked from the extension.
+    """
     audio_name = os.path.basename(audio_path)
+    ext = os.path.splitext(audio_name)[1].lower()
+    mime = _AUDIO_MIME_BY_EXT.get(ext, "application/octet-stream")
 
     if not is_server_online(audio_server_url):
         logger.warning(f"Server appears offline, skipping upload for {audio_name}.")
@@ -316,7 +329,7 @@ def upload_audio_file(audio_path):
 
     try:
         with open(audio_path, "rb") as audio_file:
-            files = {"file": (audio_name, audio_file, "audio/wav")}
+            files = {"file": (audio_name, audio_file, mime)}
             data  = {"auth_key": auth_key, "unique_id": unique_id}
             response = requests.post(audio_server_url, files=files, data=data, timeout=30)
             response.raise_for_status()
@@ -324,7 +337,7 @@ def upload_audio_file(audio_path):
         logger.error(f"Failed to upload audio file {audio_name}: {e}")
         return False
     else:
-        logger.info(f"Successfully uploaded audio file: {audio_name}")
+        logger.info(f"Successfully uploaded audio file: {audio_name} ({mime})")
         return True
 
 # Processing Functions
@@ -419,7 +432,8 @@ def process_and_upload_audio():
         logger.warning(f"Audio output directory {audio_output_dir} not found.")
         return
 
-    audio_files = [a for a in os.listdir(audio_output_dir) if a.lower().endswith(".wav")]
+    audio_files = [a for a in os.listdir(audio_output_dir)
+                   if a.lower().endswith((".wav", ".mp3"))]
     total_files = len(audio_files)
     if total_files == 0:
         logger.info("No audio files found for processing.")
