@@ -20,7 +20,7 @@
 
 # 👋 Welcome to SPARROW
 
-**SPARROW**, developed by **Microsoft's AI for Good Lab**, is an **AI-powered edge computing solution** designed to monitor and protect wildlife in the most remote regions of the world. 
+**SPARROW**, developed by **Microsoft's AI for Good Lab**, is an **AI-enabled edge computing solution** designed to monitor and protect wildlife in the most remote regions of the world. 
 
 Solar-powered and equipped with advanced sensors, it collects biodiversity data—from camera traps, acoustic monitors, and other environmental detectors—that are processed using our most advanced PyTorch-based wildlife AI models on power efficient edge GPUs. 
 
@@ -326,7 +326,7 @@ We have recently published a [technical paper on SPARROW](https://aka.ms/sparrow
 <details>
 <summary> 🦜 What is SPARROW and what does it do? </summary>
 
-The **Solar-Powered Acoustic and Remote Recording Observation Watch (SPARROW)** is an AI-powered computing solution designed to operate autonomously in the location where it is installed to monitor and collect data on biodiversity of the area.  Data is collected from camera traps, acoustic monitors, and other environmental detectors, and then processed using wildlife AI models. SPARROW is solar-powered so that it can be used in remote areas without easy access to power sources. Data can be transmitted to the cloud via satellites, allowing researchers to transfer data to the SPARROW Dashboard, or other personal dashboards, and further analyze and gain insights on their data from anywhere.   
+The **Solar-Powered Acoustic and Remote Recording Observation Watch (SPARROW)** is an AI-enabled computing solution designed to operate autonomously in the location where it is installed to monitor and collect data on biodiversity of the area.  Data is collected from camera traps, acoustic monitors, and other environmental detectors, and then processed using wildlife AI models. SPARROW is solar-powered so that it can be used in remote areas without easy access to power sources. Data can be transmitted to the cloud via satellites, allowing researchers to transfer data to the SPARROW Dashboard, or other personal dashboards, and further analyze and gain insights on their data from anywhere.   
 </details>
 
 <details>
