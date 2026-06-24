@@ -80,6 +80,8 @@ All services run in Docker containers on the Jetson, orchestrated by Docker Comp
 
 ## Getting Started
 
+New here? The [Getting Started](getting-started.md) guide walks the whole path from parts to a deployed unit. The detailed references:
+
 1. **[Hardware Setup](hardware.md)** — Bill of materials, component overview, and assembly guide
 2. **[Software Setup](setup.md)** — One-click Jetson setup script, Docker architecture, AI models
 3. **[Cite Us](cite.md)** — How to cite SPARROW in publications

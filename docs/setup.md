@@ -15,6 +15,8 @@ tags:
 
 SPARROW runs entirely in Docker containers orchestrated by Docker Compose. This page covers how to configure and launch the SPARROW software stack on a Jetson Orin Nano.
 
+New to SPARROW? The [Getting Started](getting-started.md) guide places this software step in the full build-to-deploy sequence.
+
 ---
 
 ## Prerequisites

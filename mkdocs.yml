@@ -72,6 +72,7 @@ theme:
 nav:
   - SPARROW:
     - Overview: index.md
+    - Getting Started: getting-started.md
     - Hardware Setup: hardware.md
     - Software Setup: setup.md
     - Tags: tags.md

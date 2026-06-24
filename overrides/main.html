@@ -75,6 +75,44 @@
   </script>
   {%- endif %}
 
+  {%- if page and page.file and page.file.src_path == "getting-started.md" and page.canonical_url %}
+  {#- Getting Started page only: HowTo. Steps mirror the visible getting-started.md headings. -#}
+  <script type="application/ld+json">
+  {{- {
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    "name": "Getting Started with SPARROW",
+    "description": "How to get started with SPARROW: assemble the hardware, flash and run the one-click Jetson setup, bring up the Docker services, and deploy the unit in the field.",
+    "step": [
+      {
+        "@type": "HowToStep",
+        "name": "Assemble the hardware",
+        "text": "Build the unit from the bill of materials: an NVIDIA Jetson Orin Nano, solar panel with MPPT controller and LiFePO4 battery, Starlink Mini dish, AudioMoth, WiFi camera traps, environmental sensors, and a weatherproof enclosure.",
+        "url": page.canonical_url ~ "#step-1-assemble-the-hardware"
+      },
+      {
+        "@type": "HowToStep",
+        "name": "Flash and run one-click setup",
+        "text": "Flash JetPack 6.x on the Jetson, register for a SPARROW dashboard access key, then run sparrow_setup.sh to install Docker, download the models, and configure the device in one command.",
+        "url": page.canonical_url ~ "#step-2-flash-and-run-one-click-setup"
+      },
+      {
+        "@type": "HowToStep",
+        "name": "Bring up the services",
+        "text": "Docker Compose starts the sparrow and starlink containers, which run on-device inference through NVIDIA Triton, manage power, and sync results when the satellite uplink is available.",
+        "url": page.canonical_url ~ "#step-3-bring-up-the-services"
+      },
+      {
+        "@type": "HowToStep",
+        "name": "Deploy and view your data",
+        "text": "Site the unit in the field, where it operates unattended, stores data offline, and syncs to the SPARROW Dashboard for visualization, filtering, and export.",
+        "url": page.canonical_url ~ "#step-4-deploy-and-view-your-data"
+      }
+    ]
+  } | tojson -}}
+  </script>
+  {%- endif %}
+
   {%- if page and page.file and page.file.src_path != "index.md" and page.canonical_url %}
   <script type="application/ld+json">
   {{- {

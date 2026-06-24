@@ -16,6 +16,8 @@ tags:
 
 SPARROW is a solar-powered edge AI computing unit built around the **NVIDIA Jetson Orin Nano**. It collects data from camera traps, acoustic sensors, and environmental monitors, processes it on-device using PyTorch-Wildlife models via the NVIDIA Triton Inference Server, and transmits results via Starlink satellite.
 
+New to SPARROW? The [Getting Started](getting-started.md) guide puts this hardware step in the full build-to-deploy sequence.
+
 This page summarizes the hardware components needed to build a SPARROW unit. For full step-by-step assembly instructions, wiring diagrams, and part numbers, download the official guides:
 
 - 📋 **[SPARROW Bill of Materials](https://aka.ms/sparrowbom)** — full component list with recommended vendors and quantities
