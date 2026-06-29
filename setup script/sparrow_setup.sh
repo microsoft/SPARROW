@@ -98,7 +98,7 @@ CLONE_DIR=""
 GITHUB_PAT=""
 USE_ROBIN=false
 
-ONBOARDING_URL="https://server.sparrow-earth.com/v1/onboarding"
+ONBOARDING_URL="https://server.sparrowstudio.azure.com/v1/onboarding"
 EMAIL=""
 
 ENV_FILE=""
