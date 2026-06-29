@@ -16,7 +16,7 @@ Required env:
 Optional env:
   ONLY_SAVE_ANIMALS=true/false
   DRAW_BOXES=true/false
-  SERVER_BASE_URL (defaults to https://server.sparrow-earth.com)
+  SERVER_BASE_URL (defaults to https://server.sparrowstudio.azure.com/v1)
 """
 
 import os
@@ -75,7 +75,7 @@ CONFIG_DIR = "/app/config"
 MODEL_CONFIG_FILE = os.path.join(CONFIG_DIR, "model_settings.json")
 MODEL_CONFIG_LOCK = f"{MODEL_CONFIG_FILE}.lock"
 
-SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrow-earth.com").rstrip("/")
+SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrowstudio.azure.com/v1").rstrip("/")
 MODEL_ENDPOINT = f"{SERVER_BASE_URL}/model_settings"
 model_logger.info(f"Model settings endpoint: {MODEL_ENDPOINT}")
 AUTH_KEY_PATH = "/app/config/access_key.txt"

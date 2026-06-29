@@ -18,7 +18,7 @@ Required env:
       <LOCAL_MODELS_DIR>/<selected_model>/1/model.onnx
 
 Optional env:
-  SERVER_BASE_URL (defaults to https://server.sparrow-earth.com)
+  SERVER_BASE_URL (defaults to https://server.sparrowstudio.azure.com/v1)
 """
 
 import os
@@ -160,7 +160,7 @@ except Exception as e:
     raise SystemExit(1)
 
 # Configuration Fetching
-SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrow-earth.com").rstrip("/")
+SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrowstudio.azure.com/v1").rstrip("/")
 SERVER_URL = f"{SERVER_BASE_URL}/get_scheduleaudio"
 
 try:

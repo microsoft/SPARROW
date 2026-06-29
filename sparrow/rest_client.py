@@ -44,7 +44,7 @@ audio_output_dir = "/app/recordings/"
 csv_file = "/app/static/data/detections.csv"
 logs_dir = "/app/logs/restclient_logs.log"
 
-SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrow-earth.com").rstrip("/")
+SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrowstudio.azure.com/v1").rstrip("/")
 
 image_server_url   = f"{SERVER_BASE_URL}/uploads/image"
 audio_server_url   = f"{SERVER_BASE_URL}/audio_uploads"

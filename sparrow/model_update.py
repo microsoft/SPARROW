@@ -19,7 +19,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # Configuration
-SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrow-earth.com").rstrip("/")
+SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrowstudio.azure.com/v1").rstrip("/")
 SERVER_URL = f"{SERVER_BASE_URL}/model_update"
 BASE_FILE_URL = SERVER_BASE_URL
 

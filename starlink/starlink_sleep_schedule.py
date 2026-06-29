@@ -55,7 +55,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # REST API Endpoint & Auth
-SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrow-earth.com").rstrip("/")
+SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrowstudio.azure.com/v1").rstrip("/")
 REST_API_URL    = f"{SERVER_BASE_URL}/get_schedule"
 logger.info(f"Schedule endpoint: {REST_API_URL}")
 
