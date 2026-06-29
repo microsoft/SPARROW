@@ -149,9 +149,9 @@ The repo contains a Pi configuration script `sparrow_setup.sh` that installs pre
 
 To send data to the SPARROW dashboard you will need to pair it with your account.  
 To create an account and obtain an access key visit:  
-[https://dashboard.sparrow-earth.com/](https://dashboard.sparrow-earth.com/)
+[https://www.sparrowstudio.azure.com/](https://www.sparrowstudio.azure.com/)
 
-📄 [View the SPARROW dashboard Terms & Conditions](https://dev.sparrow-earth.com/agreement)
+📄 [View the SPARROW dashboard Terms & Conditions](https://www.sparrowstudio.azure.com/agreement)
 
 **Script:** Download the SPARROW setup script from this repo once the hardware assembly and Pi OS flash is complete (detailed instructions can be found in the build instructions).  
 The setup script should be run from `~/Desktop`.
