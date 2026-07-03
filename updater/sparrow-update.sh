@@ -15,8 +15,8 @@ set -Eeuo pipefail
 # ---------------------------------------------------------------------------
 # Configuration (override in /etc/sparrow-update.conf)
 # ---------------------------------------------------------------------------
-REPO_OWNER="Clamps251"
-REPO_NAME="sparrow-pi"
+REPO_OWNER="microsoft"
+REPO_NAME="SPARROW"
 DEPLOY_DIR="/home/sparrow/Desktop/system"
 STATE_DIR="/var/lib/sparrow-update"
 LOG_FILE="$STATE_DIR/log/sparrow-update.log"
@@ -29,7 +29,8 @@ HEALTH_SLEEP_SECS=60
 HTTP_TIMEOUT=30
 DOWNLOAD_TIMEOUT=180
 USER_AGENT="sparrow-pi-updater"
-# GITHUB_TOKEN — required while the repo is private. Set in /etc/sparrow-update.conf.
+# GITHUB_TOKEN — optional. microsoft/SPARROW is public so no auth is needed;
+# left in as a hook if you ever host a private fork. Set in /etc/sparrow-update.conf.
 GITHUB_TOKEN=""
 
 CONFIG_FILE="/etc/sparrow-update.conf"
@@ -156,8 +157,9 @@ fetch_latest_matching_tag() {
 
 download_tarball() {
     local tag="$1" dest="$2"
-    # Use the API endpoint (not codeload) so the Authorization header works for
-    # private repos. The API responds with a 302 redirect to the actual tarball.
+    # Use the API endpoint (not codeload) so an Authorization header works
+    # against private forks too. The API responds with a 302 redirect to the
+    # actual tarball for public repos and follows -L below.
     local url="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/tarball/refs/tags/${tag}"
     log INFO "downloading $url"
     curl -sfL -m "$DOWNLOAD_TIMEOUT" "${AUTH_HEADERS[@]}" -o "$dest" "$url" \
@@ -176,7 +178,7 @@ verify_tarball() {
     local listing
     listing=$(tar -tzf "$tarball")
     for f in "${need[@]}"; do
-        # Listing entries look like "Clamps251-sparrow-pi-<sha>/path/to/file"
+        # Listing entries look like "microsoft-SPARROW-<sha>/path/to/file"
         grep -qE "^[^/]+/${f}\$" <<<"$listing" \
             || die "tarball missing required file: $f"
     done

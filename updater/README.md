@@ -1,7 +1,7 @@
 # SPARROW auto-updater
 
 A small bash-based update daemon for deployed SPARROW Pis. It polls
-`Clamps251/sparrow-pi` every 15 minutes, deploys the newest **tagged release**
+`microsoft/SPARROW` every 15 minutes, deploys the newest **tagged release**
 matching `v<YYYY>.<MM>.<DD>`, rebuilds and recreates the docker-compose
 stack, and **auto-rolls-back** if the new build fails to come up healthy.
 
@@ -27,32 +27,22 @@ cd /home/sparrow/Desktop/system
 sudo bash updater/install.sh
 ```
 
-That's it — no prompts, no config. The installer works against a public
-GitHub repo out of the box.
+That's it — no prompts, no config. The installer works against the public
+`microsoft/SPARROW` repo out of the box.
 
-### Optional: private repo / auth
+### Optional: private fork / auth
 
-While `Clamps251/sparrow-pi` is still private, the updater needs a GitHub
-fine-grained PAT (scoped to *Contents: Read-only* on this one repo). Pass it
-through to the installer via env var:
+If you're running your own private fork instead of the upstream repo, pass a
+GitHub fine-grained PAT (scoped to *Contents: Read-only*) through to the
+installer via env var:
 
 ```bash
 sudo env UPDATER_GITHUB_TOKEN=github_pat_xxx bash updater/install.sh
 ```
 
-It will land in `/etc/sparrow-update.conf` (mode 0600) and the updater will
-read it on every tick. To change the token later, edit that file by hand:
-
-```bash
-sudo nano /etc/sparrow-update.conf
-sudo systemctl start sparrow-update.service   # verify it works now
-```
-
-Once the repo is public, no token is needed — you can delete the file:
-
-```bash
-sudo rm /etc/sparrow-update.conf
-```
+It lands in `/etc/sparrow-update.conf` (mode 0600) and the updater reads it
+on every tick. Also override `REPO_OWNER` / `REPO_NAME` in the same file to
+point at your fork.
 
 ## Tagging a release
 

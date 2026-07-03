@@ -93,9 +93,8 @@ AUDIO_BIRDS_MODEL_DIR_NAME="1"
 AUDIO_BIRDS_MODEL_FILENAME_TEMP="MD_AudioBirds_V1.onnx"
 AUDIO_BIRDS_MODEL_FILENAME_FINAL="model.onnx"
 
-REPO_URL="https://github.com/Clamps251/sparrow-pi.git"
+REPO_URL="https://github.com/microsoft/SPARROW.git"
 CLONE_DIR=""
-GITHUB_PAT=""
 USE_ROBIN=false
 
 ONBOARDING_URL="https://server.sparrowstudio.azure.com/v1/onboarding"
@@ -397,39 +396,16 @@ download_model_audio_birds() {
     done
 }
 
-prompt_github_pat() {
-    local p1 p2
-    while true; do
-        p1=$(_input "Enter GitHub fine-grained PAT for the private repo" hide)
-        p2=$(_input "Re-enter GitHub PAT" hide)
-
-        if [[ -z "${p1:-}" || -z "${p2:-}" ]]; then
-            _error "GitHub PAT cannot be empty."
-            continue
-        fi
-        if [[ "$p1" != "$p2" ]]; then
-            _error "PAT values do not match. Please try again."
-            continue
-        fi
-        GITHUB_PAT="$p1"
-        break
-    done
-}
-
-clone_private_repo() {
+clone_repo() {
     CLONE_DIR="$SYSTEM_FOLDER"
     local tmpdir
     tmpdir="$(mktemp -d)"
 
-    log "Cloning private repo..."
+    log "Cloning $REPO_URL..."
 
-    if ! git -c http.extraHeader="Authorization: Basic $(printf 'x-access-token:%s' "$GITHUB_PAT" | base64 -w0)" \
-        clone "$REPO_URL" "$tmpdir"; then
+    if ! git clone --depth=1 "$REPO_URL" "$tmpdir"; then
         rm -rf "$tmpdir"
-        _error "Failed to clone private repo. Check:
-- the repo URL is correct
-- the PAT has access to this repo
-- the PAT has Contents: Read-only permission"
+        _error "Failed to clone $REPO_URL. Check network and that the URL is correct."
         exit 1
     fi
 
@@ -440,7 +416,6 @@ clone_private_repo() {
 
     rm -rf "$tmpdir"
     create_additional_directories
-    unset GITHUB_PAT
 }
 
 prompt_robin_usage() {
@@ -520,8 +495,7 @@ create_folders() {
     download_model
     download_model_ai4g
     download_model_audio_birds
-    prompt_github_pat
-    clone_private_repo
+    clone_repo
     prompt_robin_usage
     run_xbee_configure_if_needed
 }
