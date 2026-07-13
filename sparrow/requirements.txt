@@ -13,9 +13,9 @@ tqdm==4.66.5
 Pillow==12.2.0
 numpy==1.26.4
 pandas==1.4.4
-torch==2.8.0
-torchvision==0.23.0
-torchaudio==2.8.0
+torch==2.10.0
+torchvision==0.25.0
+torchaudio==2.10.0
 protobuf==5.29.6
 soundfile==0.12.1
 audioread==3.0.1
