@@ -19,20 +19,12 @@ import time
 import struct
 import argparse
 import binascii
-import hashlib
 import serial
 import logging
 from logging.handlers import RotatingFileHandler
 from collections import deque
 
 START_DELIM = 0x7E
-
-# Content-hash dedup. Robin retransmits the same JPEG/MP3 with fresh SIDs when
-# it doesn't hear an OK ack in time (mesh flakiness, master restart, etc.). The
-# reassembled bytes are byte-identical though, so we can catch and swallow the
-# retry without saving another copy that will just pile up in the inference /
-# upload pipeline and get 500'd by the server's unique-sha256 constraint.
-SEEN_HASHES_MAX = 5000
 
 
 # -------------------- Logging --------------------
@@ -241,60 +233,6 @@ def main():
             return audio_out
         # Unknown extensions land with images so they're visible and not silently dropped.
         return args.out
-
-    # ------- Content-hash dedup (see SEEN_HASHES_MAX comment at top of file) -------
-    seen_hashes: set = set()
-    seen_order: deque = deque()
-
-    def note_sha256(h: str):
-        if h in seen_hashes:
-            return
-        seen_hashes.add(h)
-        seen_order.append(h)
-        while len(seen_order) > SEEN_HASHES_MAX:
-            seen_hashes.discard(seen_order.popleft())
-
-    def seed_seen_hashes_from(dirs):
-        """Scan the given directories once at startup and pre-populate the seen
-        set so a restart still deduplicates against files sitting in the
-        pipeline. Broken hashes / IO errors are logged but not fatal.
-
-        IMPORTANT: only pass directories that hold the *original* bytes robin
-        sent. `/app/static/gallery` holds re-encoded JPEGs (Pillow re-saved them
-        after inference), so hashing files there gives a hash that will never
-        match robin's next retransmit of the same image. Pre-inference dirs
-        (`args.out`, `audio_out`) are safe because we write the raw bytes."""
-        loaded = 0
-        for d in dirs:
-            if not d or not os.path.isdir(d):
-                continue
-            try:
-                names = os.listdir(d)
-            except OSError as e:
-                logger.warning("seed: cannot list %s: %s", d, e)
-                continue
-            for fn in names:
-                ext = os.path.splitext(fn)[1].lower()
-                if ext not in IMAGE_EXTS and ext not in AUDIO_EXTS:
-                    continue
-                path = os.path.join(d, fn)
-                try:
-                    with open(path, "rb") as f:
-                        h = hashlib.sha256(f.read()).hexdigest()
-                    note_sha256(h)
-                    loaded += 1
-                    if loaded >= SEEN_HASHES_MAX:
-                        logger.info("seed: hit cap SEEN_HASHES_MAX=%d, stopping scan", SEEN_HASHES_MAX)
-                        return
-                except OSError as e:
-                    logger.warning("seed: failed to hash %s: %s", path, e)
-        logger.info("seed: pre-loaded %d hashes into dedup set", loaded)
-
-    # NOTE: intentionally NOT seeding from /app/static/gallery — those files
-    # have been re-encoded by inference.py and their sha256 no longer matches
-    # what robin will retransmit. Dedup on gallery-side collisions is a
-    # server-side concern (unique constraint on sha256).
-    seed_seen_hashes_from([args.out, audio_out])
 
     dev_queues: dict[int, deque] = {}
     rr = deque()
@@ -627,35 +565,18 @@ def main():
 
                     data = data[:st["size"]]
                     crc32 = binascii.crc32(data) & 0xFFFFFFFF
-                    sha_hex = hashlib.sha256(data).hexdigest()
 
                     base_name = os.path.basename(st["name"])
-
-                    if sha_hex in seen_hashes:
-                        # Byte-identical retransmit. Ack the sender so it stops
-                        # retrying, but do not create another queue entry that
-                        # would just 500 at /uploads/image.
-                        logger.info(
-                            "DUPE-SKIP dev=%s sid=%08x name='%s' bytes=%d sha256=%s (already received)",
-                            fmt64(src64_int), sid, base_name, len(data), sha_hex[:12]
-                        )
-                        send_to(src64_int, b"OK" + struct.pack(">I", sid) + struct.pack(">I", crc32))
-                        logger.info("OK -> dev=%s sid=%08x crc32=%08x (dupe-ack)", fmt64(src64_int), sid, crc32)
-                        sessions.pop(key, None)
-                        active = None
-                        continue
-
                     out_name = f"{fmt64(src64_int)}_{sid:08x}_{base_name}"
                     out_path = os.path.join(out_dir_for(base_name), out_name)
                     with open(out_path, "wb") as f:
                         f.write(data)
-                    note_sha256(sha_hex)
 
                     dt = time.time() - st["t0"]
                     kbps = (len(data) * 8) / (dt * 1000) if dt > 0 else 0.0
                     logger.info(
-                        "SAVED path=%s dev=%s sid=%08x bytes=%d time=%.1fs rate=%.1fkbps crc32=%08x sha256=%s",
-                        out_path, fmt64(src64_int), sid, len(data), dt, kbps, crc32, sha_hex[:12]
+                        "SAVED path=%s dev=%s sid=%08x bytes=%d time=%.1fs rate=%.1fkbps crc32=%08x",
+                        out_path, fmt64(src64_int), sid, len(data), dt, kbps, crc32
                     )
 
                     send_to(src64_int, b"OK" + struct.pack(">I", sid) + struct.pack(">I", crc32))
