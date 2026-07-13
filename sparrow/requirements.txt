@@ -12,7 +12,7 @@ pyserial==3.5
 tqdm==4.66.5
 Pillow==12.2.0
 numpy==1.26.4
-pandas==1.4.4
+pandas==2.2.3
 torch==2.10.0
 torchvision==0.25.0
 torchaudio==2.10.0
@@ -21,8 +21,8 @@ soundfile==0.12.1
 audioread==3.0.1
 pooch==1.8.2
 librosa==0.10.2.post1
-numba==0.59.1
-llvmlite==0.42.0
+numba==0.60.0
+llvmlite==0.43.0
 pyftpdlib==2.1.0
-onnxruntime==1.18.0
+onnxruntime==1.20.1
 piexif==1.1.3
