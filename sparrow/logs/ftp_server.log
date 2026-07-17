@@ -1,0 +1,30 @@
+2026-02-06 12:38:26,311 INFO FTP server listening on 0.0.0.0:21, saving to /app/images
+2026-02-06 12:38:26,312 INFO concurrency model: async
+2026-02-06 12:38:26,312 INFO masquerade (NAT) address: None
+2026-02-06 12:38:26,312 INFO passive ports: None
+2026-02-06 12:38:26,312 INFO >>> starting FTP server on 0.0.0.0:21, pid=10 <<<
+2026-02-06 17:00:34,112 INFO FTP server listening on 0.0.0.0:21, saving to /app/images
+2026-02-06 17:00:34,115 INFO concurrency model: async
+2026-02-06 17:00:34,115 INFO masquerade (NAT) address: None
+2026-02-06 17:00:34,116 INFO passive ports: None
+2026-02-06 17:00:34,116 INFO >>> starting FTP server on 0.0.0.0:21, pid=10 <<<
+2026-02-06 17:15:15,017 INFO FTP server listening on 0.0.0.0:21, saving to /app/images
+2026-02-06 17:15:15,019 INFO concurrency model: async
+2026-02-06 17:15:15,019 INFO masquerade (NAT) address: None
+2026-02-06 17:15:15,019 INFO passive ports: None
+2026-02-06 17:15:15,019 INFO >>> starting FTP server on 0.0.0.0:21, pid=10 <<<
+2026-02-08 11:23:39,308 INFO FTP server listening on 0.0.0.0:21, saving to /app/images
+2026-02-08 11:23:39,309 INFO concurrency model: async
+2026-02-08 11:23:39,309 INFO masquerade (NAT) address: None
+2026-02-08 11:23:39,310 INFO passive ports: None
+2026-02-08 11:23:39,310 INFO >>> starting FTP server on 0.0.0.0:21, pid=10 <<<
+2026-02-09 11:41:11,030 INFO FTP server listening on 0.0.0.0:21, saving to /app/images
+2026-02-09 11:41:11,033 INFO concurrency model: async
+2026-02-09 11:41:11,033 INFO masquerade (NAT) address: None
+2026-02-09 11:41:11,033 INFO passive ports: None
+2026-02-09 11:41:11,033 INFO >>> starting FTP server on 0.0.0.0:21, pid=10 <<<
+2026-02-09 12:13:26,343 INFO FTP server listening on 0.0.0.0:21, saving to /app/images
+2026-02-09 12:13:26,347 INFO concurrency model: async
+2026-02-09 12:13:26,347 INFO masquerade (NAT) address: None
+2026-02-09 12:13:26,347 INFO passive ports: None
+2026-02-09 12:13:26,348 INFO >>> starting FTP server on 0.0.0.0:21, pid=10 <<<

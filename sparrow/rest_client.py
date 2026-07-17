@@ -44,9 +44,9 @@ audio_output_dir = "/app/recordings/"
 csv_file = "/app/static/data/detections.csv"
 logs_dir = "/app/logs/restclient_logs.log"
 
-SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrow-earth.com").rstrip("/")
+SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrowstudio.azure.com/v1").rstrip("/")
 
-image_server_url   = f"{SERVER_BASE_URL}/uploads"
+image_server_url   = f"{SERVER_BASE_URL}/uploads/image"
 audio_server_url   = f"{SERVER_BASE_URL}/audio_uploads"
 system_metrics_url = f"{SERVER_BASE_URL}/system_metrics"
 
@@ -70,12 +70,18 @@ except Exception:
     logger.critical("Cannot proceed without a valid unique_id.")
     exit(1)
 
-# VE.Direct (Solar)
+# VE.Direct (Solar). Use a Victron-specific by-id symlink so this never grabs
+# the XBee FTDI adapter. When the VE.Direct cable isn't plugged in, the symlink
+# wont exist and serial.Serial raises FileNotFoundError, falling into ved=None.
+VE_DIRECT_PORT = os.environ.get(
+    "VE_DIRECT_PORT",
+    "/dev/serial/by-id/usb-VictronEnergy_VE.Direct_cable-if00-port0",
+)
 try:
-    ved = serial.Serial("/dev/ttyUSB0", 19200, timeout=1)
-    logger.info("Opened VE.Direct on /dev/ttyUSB0")
+    ved = serial.Serial(VE_DIRECT_PORT, 19200, timeout=1)
+    logger.info(f"Opened VE.Direct on {VE_DIRECT_PORT}")
 except Exception as e:
-    logger.error(f"Could not open VE.Direct port: {e}")
+    logger.error(f"Could not open VE.Direct port {VE_DIRECT_PORT}: {e}")
     ved = None
 
 # Helper Functions
@@ -248,40 +254,74 @@ except Exception as e:
     bus = None
 
 # Upload Functions
+def _load_sidecar_or_fallback(image_path, csv_rows):
+    """Return server-ready metadata dict. Prefer the sidecar JSON written by inference.py;
+    fall back to a minimal payload built from CSV rows when no sidecar exists (covers
+    JPEGs left over from before this change)."""
+    image_name = os.path.basename(image_path)
+    side_path = os.path.splitext(image_path)[0] + ".json"
+    if os.path.isfile(side_path):
+        try:
+            with open(side_path, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to read sidecar {side_path}: {e}; falling back to CSV-only metadata.")
+
+    captured_at = csv_rows[0].get("Date", "") if csv_rows else ""
+    return {
+        "image_name": image_name,
+        "captured_at": captured_at,
+        "detections": [],
+    }
+
+
 def upload_image_and_data(image_path, detection_data_list):
-    """Upload one image with all matching detection rows; delete CSV rows on success elsewhere."""
+    """Upload one image plus its sidecar metadata in a single POST to /uploads/image."""
     image_name = os.path.basename(image_path)
     if not is_server_online(image_server_url):
         logger.warning(f"Image server appears offline, skipping upload for {image_name}.")
         return False
 
-    success = True
-    for detection_data in detection_data_list:
-        try:
-            with open(image_path, "rb") as image_file:
-                files = {"file": (image_name, image_file, "image/jpeg")}
-                data = {
-                    "auth_key": auth_key,
-                    "unique_id": unique_id,
-                    "image_name": detection_data["Image Name"],
-                    "detection": detection_data["Detection"],
-                    "confidence": float(detection_data["Confidence Score"]),
-                    "date": detection_data["Date"],
-                }
-                logger.info("Sending image data to server: %s",
-                    {k: v for k, v in data.items() if k != "auth_key"})
-                response = requests.post(image_server_url, files=files, data=data, timeout=30)
-                response.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to upload {image_name} with detection {detection_data['Detection']}: {e}")
-            success = False
-        else:
-            logger.info(f"Successfully uploaded {image_name} with detection {detection_data['Detection']}")
-    return success
+    meta = _load_sidecar_or_fallback(image_path, detection_data_list)
+    detections = meta.get("detections", [])
+
+    try:
+        with open(image_path, "rb") as image_file:
+            files = {"file": (image_name, image_file, "image/jpeg")}
+            data = {
+                "auth_key": auth_key,
+                "unique_id": unique_id,
+                "metadata": json.dumps(meta),
+            }
+            logger.info(
+                "Sending image to server: image=%s detections=%d captured_at=%s",
+                image_name, len(detections), meta.get("captured_at", "")
+            )
+            response = requests.post(image_server_url, files=files, data=data, timeout=30)
+            response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to upload {image_name}: {e}")
+        return False
+
+    logger.info(f"Successfully uploaded {image_name} ({len(detections)} detections)")
+    return True
+
+_AUDIO_MIME_BY_EXT = {
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+}
+
 
 def upload_audio_file(audio_path):
-    """Upload a single .wav file; return True on success."""
+    """Upload a single audio file (.wav or .mp3); return True on success.
+
+    MP3s come from robin's on-device bird detector (already filtered with
+    keep_blanks=false and encoded by lameenc); WAVs come from the master's
+    own audio.py pipeline. MIME is picked from the extension.
+    """
     audio_name = os.path.basename(audio_path)
+    ext = os.path.splitext(audio_name)[1].lower()
+    mime = _AUDIO_MIME_BY_EXT.get(ext, "application/octet-stream")
 
     if not is_server_online(audio_server_url):
         logger.warning(f"Server appears offline, skipping upload for {audio_name}.")
@@ -289,7 +329,7 @@ def upload_audio_file(audio_path):
 
     try:
         with open(audio_path, "rb") as audio_file:
-            files = {"file": (audio_name, audio_file, "audio/wav")}
+            files = {"file": (audio_name, audio_file, mime)}
             data  = {"auth_key": auth_key, "unique_id": unique_id}
             response = requests.post(audio_server_url, files=files, data=data, timeout=30)
             response.raise_for_status()
@@ -297,7 +337,7 @@ def upload_audio_file(audio_path):
         logger.error(f"Failed to upload audio file {audio_name}: {e}")
         return False
     else:
-        logger.info(f"Successfully uploaded audio file: {audio_name}")
+        logger.info(f"Successfully uploaded audio file: {audio_name} ({mime})")
         return True
 
 # Processing Functions
@@ -348,21 +388,37 @@ def process_and_upload_images():
         return
 
     for image_name in os.listdir(image_output_dir):
+        if not image_name.lower().endswith((".jpg", ".jpeg", ".png")):
+            continue
         image_path = os.path.join(image_output_dir, image_name)
-        if os.path.isfile(image_path):
-            logger.info(f"Processing image {image_name}.")
-            detection_data_list = detection_records.get(image_name, [])
-            if detection_data_list:
-                success = upload_image_and_data(image_path, detection_data_list)
-                if success:
-                    remove_records_from_csv(image_name)
-                    try:
-                        os.remove(image_path)
-                        logger.info(f"Deleted local image file: {image_path}")
-                    except Exception as e:
-                        logger.error(f"Failed to delete image file {image_path}: {e}")
-            else:
-                logger.warning(f"No corresponding detection records found for {image_name}.")
+        if not os.path.isfile(image_path):
+            continue
+
+        logger.info(f"Processing image {image_name}.")
+        detection_data_list = detection_records.get(image_name, [])
+        if not detection_data_list:
+            logger.warning(f"No corresponding detection records found for {image_name}.")
+            continue
+
+        success = upload_image_and_data(image_path, detection_data_list)
+        if not success:
+            continue
+
+        remove_records_from_csv(image_name)
+        try:
+            os.remove(image_path)
+            logger.info(f"Deleted local image file: {image_path}")
+        except Exception as e:
+            logger.error(f"Failed to delete image file {image_path}: {e}")
+
+        side_path = os.path.splitext(image_path)[0] + ".json"
+        try:
+            os.remove(side_path)
+            logger.info(f"Deleted sidecar: {side_path}")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            logger.error(f"Failed to delete sidecar {side_path}: {e}")
 
 def process_and_upload_audio():
     """
@@ -376,7 +432,8 @@ def process_and_upload_audio():
         logger.warning(f"Audio output directory {audio_output_dir} not found.")
         return
 
-    audio_files = [a for a in os.listdir(audio_output_dir) if a.lower().endswith(".wav")]
+    audio_files = [a for a in os.listdir(audio_output_dir)
+                   if a.lower().endswith((".wav", ".mp3"))]
     total_files = len(audio_files)
     if total_files == 0:
         logger.info("No audio files found for processing.")

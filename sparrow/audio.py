@@ -1,9 +1,24 @@
 #!/usr/bin/env python3
 """
-Audio monitoring pipeline that records from a USB microphone (threshold- or schedule-based), 
-slices clips into overlapping windows, generates mel-spectrograms, and sends batches to a Triton model for inference. 
-Window scores are aggregated to per-second and audio-level results; recordings with confidence -> SUMMARY_THRESHOLD are kept and appended to /app/static/data/audio_detections.csv. 
-Settings are loaded from /app/config/audio_settings.json and periodically refreshed from SERVER_BASE_URL using the device unique_id.
+Audio monitoring pipeline (ONNXRuntime-only).
+
+Records from a USB microphone (threshold- or schedule-based),
+slices clips into overlapping windows, generates mel-spectrograms,
+and sends batches to a local ONNX model for inference.
+
+Window scores are aggregated to per-second and audio-level results;
+recordings with confidence -> SUMMARY_THRESHOLD are kept and appended to
+/app/static/data/audio_detections.csv.
+
+Settings are loaded from /app/config/audio_settings.json and periodically refreshed
+from SERVER_BASE_URL using the device unique_id.
+
+Required env:
+  LOCAL_MODELS_DIR  -> root folder containing ONNX models:
+      <LOCAL_MODELS_DIR>/<selected_model>/1/model.onnx
+
+Optional env:
+  SERVER_BASE_URL (defaults to https://server.sparrowstudio.azure.com/v1)
 """
 
 import os
@@ -30,9 +45,20 @@ import torch
 import torchaudio
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
-import tritonclient.http as httpclient
+
 from utils.dataset_dataloader import ResizeTo
 from utils.sparrow_id import get_hardware_id
+
+# ----------------- ONNXRuntime only -----------------
+try:
+    import onnxruntime as ort  # type: ignore
+
+    HAVE_ORT = True
+except ImportError:
+    HAVE_ORT = False
+    ort = None
+
+LOCAL_MODELS_DIR = os.getenv("LOCAL_MODELS_DIR", "").strip() or None
 
 # Configuration Paths
 CONFIG_DIR = "/app/config"
@@ -51,27 +77,19 @@ DEFAULT_CONFIG = {
     "RECORD_DURATION": 2,
     "THRESHOLD": 2500,
     "selected_model": "megadetector_birds_v1",
-    "SCHEDULE": {
-        "interval_minutes": 5,
-        "duration_minutes": 1
-    }
+    "SCHEDULE": {"interval_minutes": 5, "duration_minutes": 1},
 }
 
 # Pipeline / Model Config
 BATCH_SIZE = 16
 NUM_WORKERS = 0
-SAMPLE_RATE = 48_000 # pipeline sample rate for windows/spectrograms
+SAMPLE_RATE = 48_000  # pipeline sample rate for windows/spectrograms
 WINDOW_SIZE_SEC = 5.0
 OVERLAP_SEC = 4.0
 N_FFT = 2048
 HOP_LENGTH = 512
 N_MELS = 224
 TOP_DB = 80.0
-
-# Triton Server
-TRITON_URL = (os.getenv("TRITON_SERVER_URL") or os.getenv("TRITON_URL", "http://triton:8000")).strip().rstrip("/")
-if TRITON_URL.startswith(("http://", "https://")):
-    TRITON_URL = TRITON_URL.split("://", 1)[1]
 
 SELECTED_MODEL = DEFAULT_CONFIG["selected_model"]
 
@@ -93,8 +111,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 logger.info(f"CSV will be written to: {CSV_PATH}")
+logger.info(f"ONNXRuntime-only mode. HAVE_ORT={HAVE_ORT}, LOCAL_MODELS_DIR={LOCAL_MODELS_DIR}")
 
-# Configuration Management
+# ----------------- Configuration Management -----------------
+
+
 def load_config():
     if not os.path.exists(CONFIG_FILE):
         logger.info("Configuration file not found. Creating default configuration.")
@@ -116,6 +137,7 @@ def load_config():
         logger.error(f"Unexpected error loading config: {e}. Using defaults.")
         return DEFAULT_CONFIG.copy()
 
+
 def save_config(config):
     try:
         with FileLock(f"{CONFIG_FILE}.lock", timeout=5):
@@ -128,6 +150,7 @@ def save_config(config):
     except Exception as e:
         logger.error(f"Unexpected error while saving config: {e}")
 
+
 # Generate Unique ID (using shared sparrow_id.py)
 try:
     UNIQUE_ID = get_hardware_id()
@@ -137,7 +160,7 @@ except Exception as e:
     raise SystemExit(1)
 
 # Configuration Fetching
-SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrow-earth.com").rstrip("/")
+SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrowstudio.azure.com/v1").rstrip("/")
 SERVER_URL = f"{SERVER_BASE_URL}/get_scheduleaudio"
 
 try:
@@ -145,13 +168,15 @@ try:
         AUTH_KEY = f.read().strip()
 except Exception as e:
     logger.error(f"Failed to read access key from /app/config/access_key.txt: {e}")
-    exit(1)
+    raise SystemExit(1)
+
 
 def fetch_settings(unique_id):
     payload = {"unique_id": unique_id, "auth_key": AUTH_KEY}
+    headers = {"X-API-Key": AUTH_KEY, "X-Unit-ID": unique_id}
     try:
         logger.info("Attempting to fetch audio settings from the server.")
-        response = requests.post(SERVER_URL, json=payload, timeout=10)
+        response = requests.post(SERVER_URL, json=payload, headers=headers, timeout=10)
         if response.status_code == 200:
             server_settings = response.json()
             logger.info(f"Audio settings retrieved from server: {server_settings}")
@@ -167,7 +192,8 @@ def fetch_settings(unique_id):
     except requests.exceptions.RequestException as e:
         logger.error(f"Error while fetching settings from server: {e}")
 
-# Audio Monitoring Globals
+
+# ----------------- Audio Monitoring Globals -----------------
 # capture/recorder (device) settings - populated by update_audio_settings()
 CAPTURE_SR = None
 MONITOR_DURATION = None
@@ -183,6 +209,7 @@ MODE = "threshold"
 INTERVAL_SEC = 60 * 60
 DURATION_SEC = 10 * 60
 
+
 # Microphone Detection
 def detect_usb_microphone():
     try:
@@ -192,7 +219,7 @@ def detect_usb_microphone():
             if "card" in ll and "device" in ll and "usb" in ll:
                 try:
                     card = line.split("card")[1].split(":")[0].strip()
-                    dev  = line.split("device")[1].split(":")[0].strip()
+                    dev = line.split("device")[1].split(":")[0].strip()
                     dev_id = f"plughw:{card},{dev}"
                     logger.info(f"Detected USB audio at {dev_id}")
                     return dev_id
@@ -203,17 +230,18 @@ def detect_usb_microphone():
         logger.error(f"Error detecting audio device: {e}")
     return None
 
+
 # Update audio settings
 def update_audio_settings():
     global CAPTURE_SR, MONITOR_DURATION, RECORD_DURATION, THRESHOLD
     global DEVICE, MODE, INTERVAL_SEC, DURATION_SEC, SELECTED_MODEL
 
     config = load_config()
-    CAPTURE_SR      = int(config.get("SAMPLE_RATE",      DEFAULT_CONFIG["SAMPLE_RATE"]))
+    CAPTURE_SR = int(config.get("SAMPLE_RATE", DEFAULT_CONFIG["SAMPLE_RATE"]))
     MONITOR_DURATION = int(config.get("MONITOR_DURATION", DEFAULT_CONFIG["MONITOR_DURATION"]))
-    RECORD_DURATION  = int(config.get("RECORD_DURATION",  DEFAULT_CONFIG["RECORD_DURATION"]))
-    THRESHOLD        = int(config.get("THRESHOLD",        DEFAULT_CONFIG["THRESHOLD"]))
-    SELECTED_MODEL   = config.get("selected_model", DEFAULT_CONFIG["selected_model"])
+    RECORD_DURATION = int(config.get("RECORD_DURATION", DEFAULT_CONFIG["RECORD_DURATION"]))
+    THRESHOLD = int(config.get("THRESHOLD", DEFAULT_CONFIG["THRESHOLD"]))
+    SELECTED_MODEL = config.get("selected_model", DEFAULT_CONFIG["selected_model"])
 
     MODE = config.get("mode", "threshold")
     sched = config.get("SCHEDULE", {})
@@ -230,10 +258,16 @@ def update_audio_settings():
     else:
         logger.warning("No valid audio device detected.")
 
-# Dataset for .npy specs
+
+# ----------------- Dataset for .npy specs -----------------
 class BioacousticsInferenceDataset(Dataset):
-    def __init__(self, dataframe: pd.DataFrame, root: Optional[str] = None,
-                 x_col: str = "spec_name", target_size: Optional[List[int]] = None):
+    def __init__(
+        self,
+        dataframe: pd.DataFrame,
+        root: Optional[str] = None,
+        x_col: str = "spec_name",
+        target_size: Optional[List[int]] = None,
+    ):
         super().__init__()
         self.df = dataframe
         self.root = root
@@ -241,7 +275,8 @@ class BioacousticsInferenceDataset(Dataset):
         self.paths = [os.path.join(self.root, p) for p in self.df[self.x_col].astype(str).tolist()]
         self._resize = ResizeTo(target_size) if target_size is not None else None
 
-    def __len__(self): return len(self.df)
+    def __len__(self):
+        return len(self.df)
 
     def _load_npy(self, idx: int):
         path = self.paths[idx]
@@ -260,7 +295,8 @@ class BioacousticsInferenceDataset(Dataset):
             x = self._resize(x)
         return x, path
 
-# Windowing / Spec creation
+
+# ----------------- Windowing / Spec creation -----------------
 def build_windows_for_file(audio_path, window_size_sec, overlap_sec, sample_rate):
     window_size = int(window_size_sec * sample_rate)
     hop_size = int((window_size_sec - overlap_sec) * sample_rate)
@@ -272,33 +308,36 @@ def build_windows_for_file(audio_path, window_size_sec, overlap_sec, sample_rate
         return windows
 
     if duration_samples <= window_size:
-        windows.append({'window_id': 0, 'sound_path': audio_path, 'start': 0, 'end': duration_samples})
+        windows.append({"window_id": 0, "sound_path": audio_path, "start": 0, "end": duration_samples})
         return windows
 
     num_windows = max(1, math.ceil((duration_samples - window_size) / hop_size) + 1)
     for i in range(num_windows):
         start = i * hop_size
-        end = min(start + window_size, duration_samples)  # include last partial window
-        if end <= start:  # safety
+        end = min(start + window_size, duration_samples)
+        if end <= start:
             continue
-        windows.append({'window_id': window_idx, 'sound_path': audio_path, 'start': start, 'end': end})
+        windows.append({"window_id": window_idx, "sound_path": audio_path, "start": start, "end": end})
         window_idx += 1
 
     return windows
 
-def compute_all_mel_spectrograms_gpu(windows: List[dict],
-                                     sample_rate: int,
-                                     n_fft: int,
-                                     hop_length: Optional[int],
-                                     n_mels: int,
-                                     top_db: float,
-                                     spectrograms_path: str,
-                                     save_npy: bool,
-                                     fill_noise: bool,
-                                     noise_db_mean: Optional[float],
-                                     noise_db_std: float,
-                                     random_state: Optional[int],
-                                     storage_dtype: str) -> None:
+
+def compute_all_mel_spectrograms_gpu(
+    windows: List[dict],
+    sample_rate: int,
+    n_fft: int,
+    hop_length: Optional[int],
+    n_mels: int,
+    top_db: float,
+    spectrograms_path: str,
+    save_npy: bool,
+    fill_noise: bool,
+    noise_db_mean: Optional[float],
+    noise_db_std: float,
+    random_state: Optional[int],
+    storage_dtype: str,
+) -> None:
     if hop_length is None:
         hop_length = n_fft // 4
 
@@ -323,8 +362,16 @@ def compute_all_mel_spectrograms_gpu(windows: List[dict],
             wav_cpu = torchaudio.functional.resample(wav_cpu, orig_freq=orig_sr, new_freq=sample_rate)
 
         mel_tf = torchaudio.transforms.MelSpectrogram(
-            sample_rate=sample_rate, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels,
-            f_min=0.0, f_max=sample_rate / 2.0, power=2.0, center=False, norm="slaney", mel_scale="slaney"
+            sample_rate=sample_rate,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            n_mels=n_mels,
+            f_min=0.0,
+            f_max=sample_rate / 2.0,
+            power=2.0,
+            center=False,
+            norm="slaney",
+            mel_scale="slaney",
         ).to(device)
         to_db = torchaudio.transforms.AmplitudeToDB(stype="power", top_db=top_db).to(device)
 
@@ -348,86 +395,144 @@ def compute_all_mel_spectrograms_gpu(windows: List[dict],
             if device.type == "cuda":
                 torch.cuda.empty_cache()
 
-# Triton batching (specs -> logits)
-def run_inference_triton(dataloader: DataLoader, sample_rate: int) -> Tuple[List[str], np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    client = httpclient.InferenceServerClient(url=TRITON_URL, network_timeout=600.0)
-    if not client.is_server_live():
-        raise RuntimeError("Triton server not live")
 
-    md = client.get_model_metadata(SELECTED_MODEL)
-    in_name, out_name = md["inputs"][0]["name"], md["outputs"][0]["name"]
+# ----------------- ONNX inference (specs -> logits) -----------------
+_audio_ort_sessions = {}  # model_name -> session
 
-    all_paths, all_logits = [], []
+
+def _ensure_ort_ready() -> bool:
+    if not HAVE_ORT or ort is None:
+        logger.error("onnxruntime is not installed. Audio inference cannot run.")
+        return False
+    if not LOCAL_MODELS_DIR:
+        logger.error("LOCAL_MODELS_DIR is not set. Cannot locate audio ONNX model.")
+        return False
+    return True
+
+
+def _get_audio_onnx_session(model_name: str):
+    if model_name in _audio_ort_sessions:
+        return _audio_ort_sessions[model_name]
+    if not _ensure_ort_ready():
+        return None
+
+    model_path = os.path.join(LOCAL_MODELS_DIR, model_name, "1", "model.onnx")
+    if not os.path.isfile(model_path):
+        logger.error(f"Audio ONNX model not found at: {model_path}")
+        return None
+
+    logger.info(f"Loading audio ONNX model '{model_name}' from {model_path}")
+    sess = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+    _audio_ort_sessions[model_name] = sess
+    return sess
+
+
+def run_inference_onnx(
+    dataloader: DataLoader, sample_rate: int
+) -> Tuple[List[str], np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Run inference via ONNXRuntime.
+    Returns: (audios, starts, ends, predictions, probabilities)
+    """
+    sess = _get_audio_onnx_session(SELECTED_MODEL)
+    if sess is None:
+        empty_f = np.array([], dtype=np.float32)
+        empty_i = np.array([], dtype=np.int32)
+        return [], empty_f, empty_f, empty_i, empty_f
+
+    in_name = sess.get_inputs()[0].name
+    out_name = sess.get_outputs()[0].name
+
+    all_paths: List[str] = []
+    all_logits: List[np.ndarray] = []
 
     for x, paths in tqdm(dataloader, desc="batches", leave=False):
-        # x: [B, 1, H, W] torch
         x_np = x.numpy().astype(np.float32, copy=False)
-        inp = httpclient.InferInput(in_name, x_np.shape, "FP32")
-        inp.set_data_from_numpy(x_np, binary_data=True)
-        res = client.infer(model_name=SELECTED_MODEL, inputs=[inp])
-        logits = res.as_numpy(out_name)  # [B,1] or [B]
-        logits = np.squeeze(logits, axis=-1) if logits.ndim == 2 and logits.shape[1] == 1 else logits
-        all_logits.append(logits)
-        all_paths.extend(paths)
+        try:
+            out = sess.run([out_name], {in_name: x_np})[0]
+        except Exception as e:
+            logger.error(f"ONNX inference error: {e}")
+            continue
+
+        logits = np.asarray(out)
+        # common shapes: [B,1], [B], [B, num_classes] (we expect binary-ish)
+        if logits.ndim == 2 and logits.shape[1] == 1:
+            logits = logits[:, 0]
+        elif logits.ndim > 1 and logits.shape[0] == x_np.shape[0] and logits.shape[-1] == 1:
+            logits = logits.reshape((logits.shape[0],))
+        all_logits.append(logits.astype(np.float32, copy=False))
+        all_paths.extend(list(paths))
+
+    if not all_logits:
+        empty_f = np.array([], dtype=np.float32)
+        empty_i = np.array([], dtype=np.int32)
+        return [], empty_f, empty_f, empty_i, empty_f
 
     audios = ["_".join(os.path.basename(p).replace(".npy", "").split("_")[:-2]) for p in all_paths]
     starts = [int(os.path.basename(p).split("_")[-2]) / sample_rate for p in all_paths]
-    ends   = [int(os.path.basename(p).split("_")[-1].replace(".npy", "")) / sample_rate for p in all_paths]
+    ends = [int(os.path.basename(p).split("_")[-1].replace(".npy", "")) / sample_rate for p in all_paths]
 
-    all_logits = np.concatenate(all_logits) if len(all_logits) else np.array([], dtype=np.float32)
-    probabilities = 1 / (1 + np.exp(-all_logits)) if all_logits.size else np.array([], dtype=np.float32)
-    predictions  = (probabilities > 0.5).astype(int)    if probabilities.size else np.array([], dtype=np.int32)
-    return audios, starts, ends, predictions, probabilities
+    logits_all = np.concatenate([np.atleast_1d(a) for a in all_logits]).astype(np.float32, copy=False)
+    probabilities = 1.0 / (1.0 + np.exp(-logits_all)) if logits_all.size else np.array([], dtype=np.float32)
+    predictions = (probabilities > 0.5).astype(np.int32) if probabilities.size else np.array([], dtype=np.int32)
 
-# Aggregations / Summary
+    return audios, np.array(starts, dtype=np.float32), np.array(ends, dtype=np.float32), predictions, probabilities
+
+
+# ----------------- Aggregations / Summary -----------------
 def process_inference_results_per_second(csv_path: str) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
-    unique_audios = df['audio'].unique()
+    unique_audios = df["audio"].unique()
     all_results = []
     for audio in unique_audios:
-        audio_df = df[df['audio'] == audio].copy()
+        audio_df = df[df["audio"] == audio].copy()
         if audio_df.empty:
             continue
-        min_start = int(np.floor(audio_df['start(s)'].min()))
-        max_end   = int(np.ceil (audio_df['end(s)'].max()))
+        min_start = int(np.floor(audio_df["start(s)"].min()))
+        max_end = int(np.ceil(audio_df["end(s)"].max()))
         for second in range(min_start, max_end):
             overlapping = audio_df[
-                ((audio_df['start(s)'] <= second) & (audio_df['end(s)'] > second)) |
-                ((audio_df['start(s)'] < second + 1) & (audio_df['end(s)'] >= second + 1))
+                ((audio_df["start(s)"] <= second) & (audio_df["end(s)"] > second))
+                | ((audio_df["start(s)"] < second + 1) & (audio_df["end(s)"] >= second + 1))
             ]
             if len(overlapping) == 0:
                 continue
             weights = []
             for _, row in overlapping.iterrows():
-                overlap_start = max(row['start(s)'], second)
-                overlap_end   = min(row['end(s)'], second + 1)
+                overlap_start = max(row["start(s)"], second)
+                overlap_end = min(row["end(s)"], second + 1)
                 overlap_duration = max(0, overlap_end - overlap_start)
                 weights.append(overlap_duration)
             weights = np.array(weights)
             if weights.sum() == 0:
                 continue
             weights = weights / weights.sum()
-            avg_pred = np.average(overlapping['prediction'],  weights=weights)
-            avg_prob = np.average(overlapping['probability'], weights=weights)
-            avg_conf = np.average(overlapping['confidence'],  weights=weights)
-            all_results.append({
-                'audio': audio,
-                'second': second,
-                'count_overlaps': len(overlapping),
-                'prediction': 1 if avg_pred >= 0.5 else 0,
-                'avg_prediction': avg_pred,
-                'avg_probability': avg_prob,
-                'avg_confidence': avg_conf,
-            })
-    results_df = pd.DataFrame(all_results).sort_values(['audio', 'second']).reset_index(drop=True)
-    out_path = os.path.join(os.path.dirname(csv_path), 'per_second_results.csv')
+            avg_pred = np.average(overlapping["prediction"], weights=weights)
+            avg_prob = np.average(overlapping["probability"], weights=weights)
+            avg_conf = np.average(overlapping["confidence"], weights=weights)
+            all_results.append(
+                {
+                    "audio": audio,
+                    "second": second,
+                    "count_overlaps": len(overlapping),
+                    "prediction": 1 if avg_pred >= 0.5 else 0,
+                    "avg_prediction": avg_pred,
+                    "avg_probability": avg_prob,
+                    "avg_confidence": avg_conf,
+                }
+            )
+    results_df = pd.DataFrame(all_results).sort_values(["audio", "second"]).reset_index(drop=True)
+    out_path = os.path.join(os.path.dirname(csv_path), "per_second_results.csv")
     results_df.to_csv(out_path, index=False)
     return results_df
 
+
 def summarize_audio_level(per_second_csv_path: str, threshold: float) -> pd.DataFrame:
-    if not os.path.exists(per_second_csv_path): return pd.DataFrame()
+    if not os.path.exists(per_second_csv_path):
+        return pd.DataFrame()
     df = pd.read_csv(per_second_csv_path)
-    if df.empty: return pd.DataFrame()
+    if df.empty:
+        return pd.DataFrame()
     out_rows = []
     for audio, g in df.groupby("audio"):
         g = g.sort_values("second")
@@ -435,7 +540,7 @@ def summarize_audio_level(per_second_csv_path: str, threshold: float) -> pd.Data
         pos = g[g["avg_probability"] >= threshold]
         if not pos.empty:
             start = float(pos["second"].min())
-            end   = float(pos["second"].max() + 1)
+            end = float(pos["second"].max() + 1)
             detected = True
         else:
             start, end, detected = None, None, False
@@ -445,11 +550,13 @@ def summarize_audio_level(per_second_csv_path: str, threshold: float) -> pd.Data
     summary.to_csv(out_path, index=False)
     return summary
 
+
 def cleanup_spectrograms(path: str):
     if os.path.isdir(path):
         shutil.rmtree(path, ignore_errors=True)
 
-# CSV logging (detections only)
+
+# ----------------- CSV logging (detections only) -----------------
 def write_to_csv(audio_name, detection, confidence, date):
     lock = FileLock(CSV_PATH + ".lock", timeout=5)
     try:
@@ -463,6 +570,7 @@ def write_to_csv(audio_name, detection, confidence, date):
     except Exception as e:
         logger.error(f"Failed to write CSV '{CSV_PATH}': {e}")
 
+
 def log_audio_detection(audio_path: str, prob: float):
     audio_name = os.path.basename(audio_path)
     detection = True
@@ -470,27 +578,25 @@ def log_audio_detection(audio_path: str, prob: float):
     date_str = datetime.utcnow().isoformat(timespec="seconds") + "Z"
     write_to_csv(audio_name, detection, confidence, date_str)
 
-# End-to-end classify one file
+
+# ----------------- End-to-end classify one file -----------------
 def classify_audio_file(audio_path: str) -> Tuple[bool, float]:
     """
     Full pipeline on a single recorded file in PROCESSING_DIR:
-    window -> mel (npy) -> Triton -> per-second -> audio summary.
+    window -> mel (npy) -> ONNX -> per-second -> audio summary.
     Returns (detected, max_prob).
     """
     base = os.path.splitext(os.path.basename(audio_path))[0]
 
-    # Outputs live under PROCESSING_DIR/inference_output/
     output_dir = os.path.join(PROCESSING_DIR, "inference_output")
     spectrograms_path = os.path.abspath(os.path.join(output_dir, "spectrograms"))
     os.makedirs(spectrograms_path, exist_ok=True)
 
-    # Build windows for just this audio_path
     windows = build_windows_for_file(audio_path, WINDOW_SIZE_SEC, OVERLAP_SEC, SAMPLE_RATE)
     if len(windows) == 0:
         logger.warning(f"No windows produced for {audio_path}")
         return False, 0.0
 
-    # Compute specs
     compute_all_mel_spectrograms_gpu(
         windows=windows,
         sample_rate=SAMPLE_RATE,
@@ -500,55 +606,56 @@ def classify_audio_file(audio_path: str) -> Tuple[bool, float]:
         top_db=TOP_DB,
         spectrograms_path=spectrograms_path,
         save_npy=True,
-        fill_noise=False,           # no noise fill needed at inference
+        fill_noise=False,
         noise_db_mean=None,
         noise_db_std=3.0,
         random_state=42,
         storage_dtype="float32",
     )
 
-    # Dataset / loader
     df = pd.DataFrame(windows)
-    df['spec_name'] = df.apply(
-        lambda row: f"{os.path.basename(row['sound_path']).split('.')[0]}_{row['start']}_{row['end']}.npy",
-        axis=1
+    df["spec_name"] = df.apply(
+        lambda row: f"{os.path.basename(row['sound_path']).split('.')[0]}_{row['start']}_{row['end']}.npy", axis=1
     )
     n_frames = int(np.ceil((WINDOW_SIZE_SEC * SAMPLE_RATE - N_FFT) / HOP_LENGTH)) + 1
     target_size = (N_MELS, n_frames)
 
-    dataset = BioacousticsInferenceDataset(
-        dataframe=df, root=spectrograms_path, x_col="spec_name", target_size=target_size
-    )
-    dataloader = DataLoader(
-        dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS
-    )
+    dataset = BioacousticsInferenceDataset(dataframe=df, root=spectrograms_path, x_col="spec_name", target_size=target_size)
+    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
 
-    # Triton inference (batched)
     try:
-        audios, starts, ends, predictions, probabilities = run_inference_triton(dataloader, SAMPLE_RATE)
+        audios, starts, ends, predictions, probabilities = run_inference_onnx(dataloader, SAMPLE_RATE)
     except Exception as e:
-        logger.error(f"Triton inference failed for {audio_path}: {e}")
+        logger.error(f"ONNX inference failed for {audio_path}: {e}")
         return False, 0.0
 
-    # Save window-level results
+    if len(audios) == 0:
+        logger.info("No inference results (model missing/unavailable); treating as no detection.")
+        if DELETE_SPECTROGRAMS_AFTER:
+            del dataloader, dataset
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            cleanup_spectrograms(spectrograms_path)
+        return False, 0.0
+
     os.makedirs(output_dir, exist_ok=True)
     results_path = os.path.join(output_dir, "inference_results.csv")
-    results_df = pd.DataFrame({
-        'audio': audios,
-        'start(s)': starts,
-        'end(s)': ends,
-        'prediction': predictions,
-        'probability': probabilities,
-        'confidence': np.abs(probabilities - 0.5) * 2,
-    }).sort_values('confidence', ascending=False)
+    results_df = pd.DataFrame(
+        {
+            "audio": audios,
+            "start(s)": starts,
+            "end(s)": ends,
+            "prediction": predictions,
+            "probability": probabilities,
+            "confidence": np.abs(probabilities - 0.5) * 2,
+        }
+    ).sort_values("confidence", ascending=False)
     results_df.to_csv(results_path, index=False)
 
-    # Per-second & summary
     process_inference_results_per_second(results_path)
     per_second_csv = os.path.join(output_dir, "per_second_results.csv")
     summary = summarize_audio_level(per_second_csv, threshold=SUMMARY_THRESHOLD)
 
-    # Extract decision for this file
     detected, max_prob = False, 0.0
     if not summary.empty:
         row = summary[summary["audio"] == base]
@@ -556,7 +663,6 @@ def classify_audio_file(audio_path: str) -> Tuple[bool, float]:
             detected = bool(row["detected"].iloc[0])
             max_prob = float(row["max_prob"].iloc[0])
 
-    # Cleanup specs to save disk
     if DELETE_SPECTROGRAMS_AFTER:
         del dataloader, dataset
         if torch.cuda.is_available():
@@ -565,7 +671,8 @@ def classify_audio_file(audio_path: str) -> Tuple[bool, float]:
 
     return detected, max_prob
 
-# Recording helpers
+
+# ----------------- Recording helpers -----------------
 def _wait_for_stable_file(path: str, tries: int = 4, sleep_s: float = 0.2) -> bool:
     prev = -1
     for _ in range(tries):
@@ -579,25 +686,39 @@ def _wait_for_stable_file(path: str, tries: int = 4, sleep_s: float = 0.2) -> bo
         time.sleep(sleep_s)
     return os.path.exists(path) and os.path.getsize(path) > 0
 
+
 def _processing_path_for_timestamp(ts: str) -> str:
     return os.path.join(PROCESSING_DIR, f"{ts}.wav")
 
+
 def _final_recordings_path_for(ts: str) -> str:
     return os.path.join(RECORDINGS_DIR, f"{ts}.wav")
+
 
 def _record_to_processing(duration_sec: int) -> str:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = _processing_path_for_timestamp(ts)
     cmd = [
-        "arecord", "-D", DEVICE,
-        "-t", "wav", "-c", "1",
-        "-f", "S16_LE", "-r", str(CAPTURE_SR),
-        "-d", str(duration_sec), out,
+        "arecord",
+        "-D",
+        DEVICE,
+        "-t",
+        "wav",
+        "-c",
+        "1",
+        "-f",
+        "S16_LE",
+        "-r",
+        str(CAPTURE_SR),
+        "-d",
+        str(duration_sec),
+        out,
     ]
     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if not _wait_for_stable_file(out):
         raise RuntimeError(f"Recorded file missing/empty: {out}")
     return out
+
 
 def _keep_move_to_recordings(processing_file: str) -> str:
     ts = os.path.splitext(os.path.basename(processing_file))[0]
@@ -610,12 +731,27 @@ def _keep_move_to_recordings(processing_file: str) -> str:
         logger.error(f"Failed to move kept file to recordings: {e}")
         return processing_file
 
-# Monitoring & Recording
+
+# ----------------- Monitoring & Recording -----------------
 def monitor_audio():
     fd, temp_file = tempfile.mkstemp(prefix="monitor_", suffix=".wav")
     os.close(fd)
-    command = ["arecord", "-D", DEVICE, "-t", "wav", "-c", "1", "-f", "S16_LE",
-               "-r", str(CAPTURE_SR), "-d", str(MONITOR_DURATION), temp_file]
+    command = [
+        "arecord",
+        "-D",
+        DEVICE,
+        "-t",
+        "wav",
+        "-c",
+        "1",
+        "-f",
+        "S16_LE",
+        "-r",
+        str(CAPTURE_SR),
+        "-d",
+        str(MONITOR_DURATION),
+        temp_file,
+    ]
     try:
         subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if not _wait_for_stable_file(temp_file):
@@ -627,8 +763,11 @@ def monitor_audio():
         logger.error(f"Monitoring failed: {e}")
         return None
     finally:
-        try: os.remove(temp_file)
-        except Exception: pass
+        try:
+            os.remove(temp_file)
+        except Exception:
+            pass
+
 
 def record_triggered_audio():
     try:
@@ -649,7 +788,7 @@ def record_triggered_audio():
     except Exception as e:
         logger.error(f"Unexpected error during triggered recording: {e}")
 
-# Monitoring Loop
+
 def audio_monitoring_loop():
     logger.info("Audio monitoring thread started.")
     while True:
@@ -691,14 +830,14 @@ def audio_monitoring_loop():
             logger.info(f"Next scheduled record in {to_sleep}s")
             time.sleep(to_sleep)
 
-# Settings Fetch Thread
+
 def settings_fetching_loop(unique_id):
     logger.info("Settings fetching thread started.")
     while True:
         fetch_settings(unique_id)
         time.sleep(120)
 
-# Main
+
 def main():
     logger.info("Audio recording script started.")
     os.makedirs(RECORDINGS_DIR, exist_ok=True)
@@ -717,6 +856,7 @@ def main():
         logger.info("Audio recording script terminated by user.")
     except Exception as e:
         logger.critical(f"Unexpected error in main thread: {e}")
+
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,4 @@
-![SPARROW — Solar-Powered Acoustic and Remote Recording Observation Watch, edge AI for wildlife monitoring](https://zenodo.org/records/17547596/files/SPARROW-banner.png)
+![image](https://zenodo.org/records/17547596/files/SPARROW-banner.png)
  
   </a>
 </p>
@@ -28,24 +28,6 @@ The resulting critical information is then transmitted via low-Earth orbit satel
 <!-- This section has the latex citation 
 To learn more about project SPARROW, please checkout our SPARROW paper here 👉 [aka.ms/sparrowpaper](https://aka.ms/sparrowpaper)-->
 
----
-
-## Part of the Microsoft Biodiversity Ecosystem
-
-| Repository | Description |
-|---|---|
-| [microsoft/Biodiversity](https://github.com/microsoft/Biodiversity) | Umbrella hub — PyTorch-Wildlife, MegaDetector, ecosystem overview |
-| [microsoft/MegaDetector](https://github.com/microsoft/MegaDetector) | Animal/human/vehicle detector for camera traps |
-| [microsoft/Pytorch-Wildlife](https://github.com/microsoft/Pytorch-Wildlife) | Unified AI framework: detection + species classification |
-| [microsoft/MegaDetector-Acoustic](https://github.com/microsoft/MegaDetector-Acoustic) | Bioacoustic AI for audio-based wildlife detection and classification |
-| [microsoft/MegaDetector-Overhead](https://github.com/microsoft/MegaDetector-Overhead) | Wildlife detection in aerial and drone imagery |
-| [microsoft/MegaDetector-Sonar](https://github.com/microsoft/MegaDetector-Sonar) | Sonar-based wildlife detection for aquatic monitoring |
-| [microsoft/MegaDetector-Classifier](https://github.com/microsoft/MegaDetector-Classifier) | Camera-trap species classification fine-tuning — adapt classifiers to your own datasets and geographic regions |
-| [microsoft/SPARROW](https://github.com/microsoft/SPARROW) | This repo — solar-powered edge AI for wildlife monitoring |
-| SPARROW Studio | Desktop application for all AI for Good Lab models |
-
----
-
 # ✨ Key Features
 
 1. **🔋 Autonomous operation**  
@@ -55,7 +37,7 @@ To learn more about project SPARROW, please checkout our SPARROW paper here 👉
    Camera traps, acoustic monitoring, and environmental sensors - SPARROW integrates multi-modal sensing to capture images, sounds, and enviromental metrics for comprehensive biodiversity monitoring.
 
 3. **🧠 On-device AI**  
-   Runs optimized PyTorch-Wildlife models on power efficient edge GPUs (e.g., Jetson Orin Nano) for real-time image and acoustic detection, species classification, and event recognition.
+   Runs optimized PyTorch Wildlife models (exported to ONNX) on a Raspberry Pi 5 via ONNXRuntime for real-time image and acoustic detection, species classification, and event recognition.
 
 4. **🌐 Global connectivity**  
    Even in the most remote ecosystems, SPARROW maintains a link to the cloud or on-premise infrastructure through low-Earth-orbit satellites, ensuring that vital conservation data reaches researchers in near real time.
@@ -92,9 +74,9 @@ This curated list is designed to simplify the process for beginners and those wi
  
 | **System** | **Item**                                                        | **Description**                                                                                                                                                                                                                              | **Qty** | **Tested/Recommended**                                                                                                                                                   |
 | -------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Brain          | NVIDIA Jetson Orin Nano Super Developer Kit                         | AI Edge Compute Device                                                                                                                                                                                                                            | 1           | NVIDIA Jetson Orin Nano Super Developer Kit                                                                                                                                  |
+| Brain          | Raspberry Pi 5                                                      | AI edge compute device (8 GB model recommended)                                                                                                                                                                                                   | 1           | Raspberry Pi 5 (8 GB)                                                                                                                                                        |
 |                | 2TB PCIe Gen 4 NVMe M.2 Internal Solid State Hard Drive             | 2TB SSD Drive                                                                                                                                                                                                                                     | 1           | Samsung 980 PRO SSD MZ-V8P2T0CW                                                                                                                                              |
-|                | Pi 3 Click Shield                                                   | Pi 3 Click Shield converts the GPIO pins on the NVIDIA Jetson Orin Nano into two mikroBUS™ sockets                                                                                                                                                | 1           | MIKROE-2756                                                                                                                                                                  |
+|                | Pi 3 Click Shield                                                   | Converts the Raspberry Pi GPIO pins into two mikroBUS™ sockets for the sensor / RTC click boards                                                                                                                                                  | 1           | MIKROE-2756                                                                                                                                                                  |
 |                | mikroBUS Shuttle                                                    | Mikroe Shuttle is a small add-on board, which is intended to be used with Shuttle click, in order to expand the mikroBUS™ with additional stacking options.                                                                                       | 4           | MIKROE-2882                                                                                                                                                                  |
 |                | mikroBUS Shuttle Click                                              | Shuttle click is a mikroBUS socket expansion board, which provides an easy and elegant solution for stacking up to four click boards\\ on a single mikroBUS                                                                                       | 2           | MIKROE-2880                                                                                                                                                                  |
 |                | DS3231M I2C Board                                                   | Real-time clock module which has an extremely low power consumption, allowing it to be used with a single button cell battery, for an extended period of time                                                                                     | 1           | MIKROE-3770                                                                                                                                                                  |
@@ -113,8 +95,8 @@ This curated list is designed to simplify the process for beginners and those wi
 |                |                                                                     |                                                                                                                                                                                                                                                   |             |                                                                                                                                                                              |
 | Build          | Outdoor Weatherproof IP65 Electrical Junction Box                   | Outdoor Weatherproof IP65 Electrical Junction Box, Ventilated Design,  Use with Mounting Panel & Hinged Cover. Size: 17"x13"x7"                                                                                                                   | 1           | ANIMACYN Electrical Junction Box, Ventilated Design, Cable Grommets, Indoor/Outdoor Use with Mounting Panel & Hinged Cover. Waterproof IP 65. (Grey Cover, 17.7"x13.7"x7.9") |
 |                | 18AWG Speaker Wire (Black+Red)                                      | 18AWG Copper Clad Aluminum Speaker Wire (Black + Red)                                                                                                                                                                                             | 1           | GEARit GEARit Speaker Wire 18 Gauge, Speaker Cable 18AWG                                                                                                                     |
-|                | Displayport Headless EDID Dongle                                    | Displayport monitor emulator required to guarantee image output during remote control of Jetson unit                                                                                                                                              | 1           | BKFK dp Dummy Plug - Display to hdmi Adapter, Luna Display Virtual Window for Home-edid Emulator-Dummy, displayport Headless dummie dongle(DP-1P)                            |
-|                | 5.5mm x 2.5mm 90 Degree Right Angle DC Barrel Male Plug Jack        | 5.5mm x 2.5mm 90 Degree Right Angle DC Barrel Plug to Power the Jetson Unit                                                                                                                                                                       | 1           | Fancasee DC Power Pigtail Cable, 10-Pack 5.5mm x 2.5mm 90 US-CAB-65                                                                                                          |
+|                | Displayport Headless EDID Dongle                                    | Displayport monitor emulator required to guarantee image output during remote control of the Pi                                                                                                                                                   | 1           | BKFK dp Dummy Plug - Display to hdmi Adapter, Luna Display Virtual Window for Home-edid Emulator-Dummy, displayport Headless dummie dongle(DP-1P)                            |
+|                | 5.5mm x 2.5mm 90 Degree Right Angle DC Barrel Male Plug Jack        | 5.5mm x 2.5mm 90 Degree Right Angle DC Barrel Plug to power the Pi                                                                                                                                                                                | 1           | Fancasee DC Power Pigtail Cable, 10-Pack 5.5mm x 2.5mm 90 US-CAB-65                                                                                                          |
 |                | 5.5mm x 2.1mm DC Female Plug to Bare Wire                           | Starlink Mini Power DC Female Plug (you can use either a DC female plug to bare wire, or a fully assembled pig tail)                                                                                                                              | 1           | Tonton 16AWG DC Power Pigtails Cable - 3.3FT, Pure Copper, Orange - 5.5mm x 2.1mm DC Female Plug to Bare Wire Open End                                                       |
 |                | Zip Ties Assorted Size                                              | Zip Ties Assorted Size, Double Sided Toothed,Heavy Duty Cable Wire Ties                                                                                                                                                                           | 1           | JIANYANG Zip Ties Assorted Size, 8+12+14+18 Inch                                                                                                                             |
 |                | 10FT USB A to Micro USB Cable                                       | Long Micro USB cable for the Audiomoth                                                                                                                                                                                                            | 1           | MOVOYEE Long 10FT USB to Micro USB Cable                                                                                                                                     |
@@ -122,7 +104,7 @@ This curated list is designed to simplify the process for beginners and those wi
 |                |                                                                     |                                                                                                                                                                                                                                                   |             |                                                                                                                                                                              |
 | Network        | STARLINK Mini Kit                                                   | STARLINK Mini Kit - High-Speed Portable Internet for Remote and Mobile Use                                                                                                                                                                        | 1           | Starlink Mini Antenna Kit                                                                                                                                                    |
 |                | Starlink Ethernet Adapter RJ45 Coupler Waterproof Compatible        | Weatherproof Starlink Compatible RJ45 Coupler                                                                                                                                                                                                     | 1           | EAZUSE RJ45 Starlink Ethernet Adapter Gen 3/Mini                                                                                                                             |
-|                | Cat 6 Outdoor Ethernet Cable from Jetson to Starlink                | Cat 6 Outdoor Ethernet Cable, 24AWG 10Gbps Waterproof Direct Burial LLDPE UV Jacket (overall length subject to installation)                                                                                                                      | 1           | VOIETOLT Cat 6 Outdoor Ethernet Cable 30 ft, 24AWG 10Gbps Cat6 Cable Cord Waterproof Direct Burial LLDPE UV Jacket                                                           |
+|                | Cat 6 Outdoor Ethernet Cable from Pi to Starlink                    | Cat 6 Outdoor Ethernet Cable, 24AWG 10Gbps Waterproof Direct Burial LLDPE UV Jacket (overall length subject to installation)                                                                                                                      | 1           | VOIETOLT Cat 6 Outdoor Ethernet Cable 30 ft, 24AWG 10Gbps Cat6 Cable Cord Waterproof Direct Burial LLDPE UV Jacket                                                           |
 |                | 2X WiFi Antenna with MHF4/IPEX to RP-SMA Pigtail Antenna WiFi Cable | Pair of 6dBi Dual Band WiFi RP-SMA Male Antenna +2 x 35CM RP-SMA IPEX MHF4 Pigtail Cable for M.2 NGFF WiFi WLAN Card                                                                                                                              | 1           | HIGHFINE 2 x 6dBi 2.4GHz 5GHz Dual Band WiFi RP-SMA Male Antenna+2 x 35CM RP-SMA IPEX MHF4 Pigtail Cable for M.2 NGFF WiFi WLAN Card                                         |
 | Optional       | 10dBi Long Range Outdoor WiFi Fiberglass Antenna                    | Optional upgrade to improve overall WiFi Range. Requires additional glands to route the cables through the Junction Box Case, \*\*IMPORTANT NOTE: MHF4/IPEX to RP-SMA Pigtail Antenna WiFi Cable is REQUIRED and must be purchased separately\*\* | 2           | eifagur 10dBi Long Range Dual Band WiFi 2.4GHz 5GHz Fiberglass Antenna                                                                                                       |
 |                |                                                                     |                                                                                                                                                                                                                                                   |             |                                                                                                                                                                              |
@@ -161,17 +143,17 @@ SPARROW Assembly and Set-Up Guide © 2025 by Microsoft is licensed under MIT.
 
 ---
 
-## ⚡ 2. One-click Jetson Setup (Recommended)
+## ⚡ 2. One-click Raspberry Pi Setup (Recommended)
 
-The repo contains a Jetson configuration script `sparrow_setup.sh` that installs prerequisites, prepares folders, downloads default Triton models, seeds the DS3231 RTC, configures Wi-Fi hotspot, and launches the SPARROW services.
+The repo contains a Pi configuration script `sparrow_setup.sh` that installs prerequisites, prepares folders, downloads the default ONNX models, configures the Wi-Fi hotspot, and launches the SPARROW services.
 
 To send data to the SPARROW dashboard you will need to pair it with your account.  
 To create an account and obtain an access key visit:  
-[https://dashboard.sparrow-earth.com/](https://dashboard.sparrow-earth.com/)
+[https://www.sparrowstudio.azure.com/](https://www.sparrowstudio.azure.com/)
 
-📄 [View the SPARROW dashboard Terms & Conditions](https://dev.sparrow-earth.com/agreement)
+📄 [View the SPARROW dashboard Terms & Conditions](https://www.sparrowstudio.azure.com/agreement)
 
-**Script:** Download the SPARROW setup script from this repo once the hardware assembly and Jetson flash is complete (detailed instructions can be found in the build instructions).  
+**Script:** Download the SPARROW setup script from this repo once the hardware assembly and Pi OS flash is complete (detailed instructions can be found in the build instructions).  
 The setup script should be run from `~/Desktop`.
 
 ### ▶️ Usage
@@ -201,20 +183,17 @@ Creates `~/Desktop/system` with:
 ├── docker-compose.yml
 ├── sparrow_setup.sh
 ├── Models/
-│   └── tritonserver/
+│   └── tritonserver/                  # vestigial dir name; no Triton server runs
 │       └── model_repository/
 │           ├── megadetectorv6/
-│           │   ├── 1/
-│           │   │   └── model.onnx
-│           │   └── config.pbtxt
+│           │   └── 1/
+│           │       └── model.onnx
 │           ├── AI4GAmazonClassification/
-│           │   ├── 1/
-│           │   │   └── model.onnx
-│           │   └── config.pbtxt
+│           │   └── 1/
+│           │       └── model.onnx
 │           └── megadetector_birds_v1/
-│               ├── 1/
-│               │   └── model.onnx
-│               └── config.pbtxt
+│               └── 1/
+│                   └── model.onnx
 ├── sparrow/
 │   ├── Dockerfile
 │   ├── config/
@@ -233,8 +212,22 @@ Creates `~/Desktop/system` with:
 
 ```
 
-### 4️⃣ Models + Configs
-Downloads three default ONNX models from Zenodo and writes minimal `config.pbtxt` for each Triton repo.
+### 4️⃣ Models
+Downloads three default ONNX models from Zenodo into `Models/tritonserver/model_repository/<model_name>/1/model.onnx`. The `tritonserver/` directory name is vestigial — inference is ONNXRuntime-only — but the path layout is what `LOCAL_MODELS_DIR` and `inference.py` expect.
+
+### 🔧 XBee Radio Config (ROBIN deployments only)
+If you answer **yes** to "Is ROBIN being used?", the script auto-detects the FTDI XBee adapter on `/dev/serial/by-id/` and runs `xbee_configure.py` once over AT command mode, writing these settings to the radio's flash (persistent across reboots):
+
+| AT Register | Value | Purpose |
+|---|---|---|
+| `AP` | `1` | API mode (no escapes) — required for the framed protocol `xbee_master_collect.py` uses at runtime |
+| `CE` | `0` | Standard router — routes packets in the mesh |
+| `BR` | `1` | RF data rate 80 kbps — must match remote nodes |
+| `ID` | `1234` | Network ID — must match remote nodes (robins, camera nodes) |
+| `NI` | `SPARROW_MASTER` | Node identifier |
+| `BD` | `7` | UART baud 115200 |
+
+The radio is auto-probed across common bauds (115200, 9600, 57600, 19200, 38400, 230400) so it works whether the adapter shipped pre-configured or virgin. Settings are written with `WR`, so re-running setup is safe but unnecessary once the XBee has been provisioned.
 
 ### 5️⃣ Access Key
 Prompts for the server access key (obtained from the SPARROW dashboard) and writes it to:
@@ -243,15 +236,12 @@ sparrow/config/access_key.txt
 starlink/config/access_key.txt
 ```
 
-### 6️⃣ RTC Seeding (DS3231 over I2C bus 7)
-Gets UTC from WorldClock API (fallback: NTP or system UTC) and writes it to the RTC.
-
-### 7️⃣ Wi-Fi Hotspot
+### 6️⃣ Wi-Fi Hotspot
 Configures a persistent hotspot via NetworkManager:  
 **SSID:** `CameraTraps`  
 **Password:** `User prompted`
 
-### 8️⃣ Docker Build & Launch
+### 7️⃣ Docker Build & Launch
 Builds images with BuildKit (no cache), runs `docker-compose up -d`, and tails logs.
 
 ---
@@ -260,8 +250,8 @@ Builds images with BuildKit (no cache), runs `docker-compose up -d`, and tails l
 
 All Python dependencies are inside the containers (no host Python required):
 
-1. `PyTorch`, `torchaudio`, `tritonclient`, `aiosmtpd`, `psutil`, `smbus2`, `pyserial`, etc.  
-2. **NVIDIA Triton Inference Server** (explicit model control mode)  
+1. `PyTorch`, `torchaudio`, `aiosmtpd`, `psutil`, `smbus2`, `pyserial`, `Pillow`, `piexif`, etc.  
+2. **ONNXRuntime** — inference runs directly via `onnxruntime.InferenceSession`; no separate inference server.  
 3. **Hardware:** I2C, ALSA audio, and USB serial (compose is configured privileged)
 
 ---
@@ -272,15 +262,77 @@ The client calls these endpoints on `SERVER_BASE_URL`:
 
 | Endpoint | Description |
 |-----------|--------------|
-| `/uploads` | Image + detection metadata |
+| `/uploads/image` | Image + detections JSON (one POST per image, includes pixel-int bbox per detection) |
 | `/audio_uploads` | WAV audio files |
 | `/system_metrics` | System + sensor metrics JSON |
 | `/get_schedule` | Starlink sleep window |
 | `/get_scheduleaudio` | Audio capture settings |
 | `/model_settings` | Classification model + labels |
-| `/model_update` | Triton model manifest |
+| `/model_update` | Model manifest used by `model_update.py` to mirror the on-disk model repo |
 
-Each request includes `auth_key` and a `unique_id` derived from `/etc/unique_id`.
+Each request includes `auth_key` (or the `X-API-Key` header) and a `unique_id` (or `X-Unit-ID` header) derived from `/etc/unique_id`.
+
+---
+
+# 🔄 Automatic Updates
+
+Once a SPARROW Pi is in the field, code changes are picked up automatically. A small bash daemon (`updater/sparrow-update.sh`, deployed by `updater/install.sh` to `/usr/local/sbin/`) polls this repo every 15 minutes, deploys the newest matching tag, rebuilds the docker-compose stack, and **rolls back automatically** if the new build doesn't pass a 60-second post-restart health check.
+
+## What gets deployed
+
+The updater only acts on tags matching:
+
+```
+^v[0-9]{4}\.[0-9]{2}\.[0-9]{2}(-[A-Za-z0-9._-]+)?$
+```
+
+So `v2026.06.10` or `v2026.06.10-hotfix1` ship; plain commits on `main`, branch names, or `release/...` tags don't. Tagging is the gate — pushing to `main` without a tag is a no-op for every deployed Pi.
+
+## Shipping a change
+
+```bash
+# from your dev machine
+git commit -am "fix the thing"
+git push
+git tag v2026.06.10
+git push origin v2026.06.10
+```
+
+Within 15 minutes every Pi running the updater picks it up. Force an immediate run via SSH if you want it sooner:
+
+```bash
+ssh sparrow@<pi-ip> 'sudo systemctl start sparrow-update.service'
+```
+
+## What's preserved across updates
+
+The updater's rsync explicitly excludes everything Pi-specific so deployments never clobber local state:
+
+- `sparrow.env`, `starlink.env` — deployment-specific server URLs / passwords
+- `sparrow/config/access_key.txt`, `starlink/config/access_key.txt`
+- `sparrow/{logs,images,recordings,static}/`, `starlink/{logs,config}/`
+- `Models/` — ONNX files are managed by `model_update.py` from the server, not by git
+- `.git/` — so `git` on the Pi stays usable
+
+If you need to change one of these on a deployed Pi, edit it on the Pi (`sudo nano /home/sparrow/Desktop/system/sparrow.env`); don't push it through a tag.
+
+## Failure paths
+
+- **Tarball download or compose-validate fails** → exit cleanly, try again on the next 15-min tick.
+- **`docker-compose build` fails** → restore the previous code from the on-disk backup, rebuild against it, log `ROLLBACK`.
+- **Health check fails after restart** → same: restore backup, rebuild, recreate. The previous working containers come back.
+- **Both new deploy AND rollback fail health check** → a `STUCK` flag is dropped at `/var/lib/sparrow-update/STUCK`. The timer keeps firing but the script bails immediately while the flag is present so it can't make things worse. Clear by hand after diagnosis: `sudo rm /var/lib/sparrow-update/STUCK`.
+
+## Bootstrap on a fresh Pi
+
+The setup wizard (`sparrow_setup.sh`) ends with a prompt — answer **yes** to install the updater. Or install it later by hand:
+
+```bash
+cd /home/sparrow/Desktop/system
+sudo bash updater/install.sh
+```
+
+Full operator docs (status commands, the `STUCK` flag, log rotation, config overrides) are in [`updater/README.md`](updater/README.md).
 
 ---
 

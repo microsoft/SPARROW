@@ -17,7 +17,7 @@ from starlink_grpc import ChannelContext, status_data, history_bulk_data, get_lo
 # Configuration
 CONFIG_PATH = "/app/config/schedule_config.json"
 LOG_DIR = "/app/logs"
-SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrow-earth.com").rstrip("/")
+SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrowstudio.azure.com/v1").rstrip("/")
 API_ENDPOINT    = f"{SERVER_BASE_URL}/metrics"
 with open("/app/config/access_key.txt", "r") as f:
     AUTH_KEY = f.read().strip()

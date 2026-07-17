@@ -1,4 +1,4 @@
-FROM python:3.10-slim-bookworm
+FROM python:3.12-slim-bookworm
 
 # Install system build tools and libraries
 RUN apt-get update && apt-get install -y \
@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --upgrade pip setuptools wheel
 
 # Install compatible Cython FIRST so pip doesn't pull a different one in the build env
-RUN pip install cython==0.29.36
+RUN pip install cython==3.0.11
 
 # Copy and install all other dependencies
 COPY requirements.txt .

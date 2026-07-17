@@ -10,16 +10,37 @@ Provides:
 import time
 import logging
 import threading
-from smbus2 import i2c_msg
+from smbus2 import SMBus, i2c_msg
 from typing import Dict, Any, Optional, Callable
 
 # Logger
 logger = logging.getLogger(__name__)
 
 # Sensor Configuration
-I2C_BUS = 7
+# Prefer Jetson I2C bus 7, fall back to Raspberry Pi bus 1
+I2C_BUS = 1
+PREFERRED_I2C_BUSES = (7, I2C_BUS)
+
 SHTC3_ADDRESS = 0x70      # SHTC3
 BME688_DEFAULT = 0x77     # default (0x76 alternate)
+
+def open_i2c_bus(preferred_buses=PREFERRED_I2C_BUSES):
+    """
+    Try opening I2C buses in order.
+    Returns an SMBus instance or None.
+    """
+    last_err = None
+    for bus_id in preferred_buses:
+        try:
+            bus = SMBus(bus_id)
+            bus._bus_id = bus_id
+            logger.info(f"Opened I2C bus {bus_id}")
+            return bus
+        except Exception as e:
+            last_err = e
+            logger.debug(f"Failed to open I2C bus {bus_id}: {e}")
+    logger.warning(f"Could not open any I2C bus {preferred_buses}: {last_err}")
+    return None
 
 # Registry & Types
 SensorDetect = Callable[[Any], Optional[Dict[str, Any]]]
