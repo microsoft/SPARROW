@@ -52,6 +52,14 @@ Data collection, on-device inference, power management, telemetry, and secure tr
 
 All services run in **Docker** and are orchestrated with **Docker Compose**. 🐳
 
+> [!NOTE]
+> **Jetson compatibility:** SPARROW now targets Raspberry Pi 5. The last
+> revision with NVIDIA Jetson support is
+> [`59f7351`](https://github.com/microsoft/SPARROW/commit/59f7351).
+> Users who prefer Jetson hardware can fork the repository and create a branch
+> from that revision. Jetson-specific fixes made from that point are community
+> maintained and are not included in the current Raspberry Pi release.
+
 ---
 
 # 🚀 Getting Started
