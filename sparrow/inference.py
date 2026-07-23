@@ -1,16 +1,22 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
-This script uses Triton Inference Server to perform object detection using the MegaDetectorV6 model,
-and then for each "animal" detection, it crops the bounding box and sends it to a classification
-model (e.g., AI4GAmazonClassification) for species classification.
+ONNXRuntime-only inference pipeline (Pi-friendly).
 
-Results are:
-- Logged to CSV
-- For JPEG outputs, all bounding boxes (with labels & scores) are stored as JSON in EXIF
-  UserComment so server-side can turn overlays on/off later.
+- Runs MegaDetectorV6 (detection) using ONNXRuntime
+- For each "animal" detection, crops and runs a classification ONNX model
+- Logs to CSV
+- Saves JPEG outputs with detection metadata stored as JSON in EXIF UserComment
+- Optionally draws boxes on output images (DRAW_BOXES=true/false)
 
-By default, the saved image pixels are on (boxes drawn). You can disable drawing with:
-    DRAW_BOXES=flase
+Required env:
+  LOCAL_MODELS_DIR  -> root folder containing ONNX models:
+      <LOCAL_MODELS_DIR>/megadetectorv6/1/model.onnx
+      <LOCAL_MODELS_DIR>/<selected_model>/1/model.onnx
+
+Optional env:
+  ONLY_SAVE_ANIMALS=true/false
+  DRAW_BOXES=true/false
+  SERVER_BASE_URL (defaults to https://server.sparrowstudio.azure.com/v1)
 """
 
 import os
@@ -23,15 +29,28 @@ from datetime import datetime
 
 from PIL import Image, ImageFile, ImageDraw, ImageFont
 import numpy as np
-import tritonclient.http as httpclient
 import torch
 import torchvision.transforms as T
 import torch.nn.functional as F
 import requests
 from filelock import FileLock
+import piexif  # EXIF metadata
+
 from utils.sparrow_id import get_hardware_id
 from utils.detection_utils import non_max_suppression, scale_boxes
-import piexif  # EXIF metadata
+
+# ----------------- ONNXRuntime only -----------------
+try:
+    import onnxruntime as ort  # type: ignore
+
+    HAVE_ORT = True
+except ImportError:
+    HAVE_ORT = False
+    ort = None
+
+LOCAL_MODELS_DIR = os.getenv("LOCAL_MODELS_DIR", "").strip() or None
+
+# ----------------------------------------------------
 
 # Setup Logging & Folders
 LOGS_DIR = "/app/logs"
@@ -39,11 +58,11 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
         logging.FileHandler(os.path.join(LOGS_DIR, "inference.log")),
-        logging.StreamHandler()
-    ]
+        logging.StreamHandler(),
+    ],
 )
 model_logger = logging.getLogger("model_settings")
 log = logging.getLogger("inference")
@@ -56,13 +75,14 @@ CONFIG_DIR = "/app/config"
 MODEL_CONFIG_FILE = os.path.join(CONFIG_DIR, "model_settings.json")
 MODEL_CONFIG_LOCK = f"{MODEL_CONFIG_FILE}.lock"
 
-SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrow-earth.com").rstrip("/")
+SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrowstudio.azure.com/v1").rstrip("/")
 MODEL_ENDPOINT = f"{SERVER_BASE_URL}/model_settings"
 model_logger.info(f"Model settings endpoint: {MODEL_ENDPOINT}")
 AUTH_KEY_PATH = "/app/config/access_key.txt"
 
 DEFAULT_MODEL_CONFIG = {
     "selected_model": "AI4GAmazonClassification",
+    # NOTE: keeping the original key name "lables" for backward compatibility
     "lables": {
         "0": "Dasyprocta",
         "1": "Bos",
@@ -99,11 +119,11 @@ DEFAULT_MODEL_CONFIG = {
         "32": "Furnarius",
         "33": "Didelphis",
         "34": "Sylvilagus",
-        "35": "Unknown"
+        "35": "Unknown",
     },
     "classification_enabled": True,
     "keep_blanks": False,
-    "detection_threshold": 0.4
+    "detection_threshold": 0.4,
 }
 
 os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -137,12 +157,13 @@ def save_model_config(config):
 
 
 def fetch_model_settings(unique_id, auth_key):
-    """
-    Fetch updated model settings from the server.
-    If different from local, update local file.
-    """
+    """Fetch updated model settings from server; update local file if changed."""
     payload = {"unique_id": unique_id, "auth_key": auth_key}
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "X-API-Key": auth_key,
+        "X-Unit-ID": unique_id,
+    }
     try:
         response = requests.post(MODEL_ENDPOINT, json=payload, headers=headers, timeout=10)
         if response.status_code == 200:
@@ -154,7 +175,9 @@ def fetch_model_settings(unique_id, auth_key):
             else:
                 model_logger.info("Model settings unchanged.")
         else:
-            model_logger.warning(f"Model settings fetch failed: {response.status_code} - {response.text}")
+            model_logger.warning(
+                f"Model settings fetch failed: {response.status_code} - {response.text}"
+            )
     except Exception as e:
         model_logger.warning(f"Could not fetch model settings: {e}")
 
@@ -168,27 +191,24 @@ def model_settings_fetch_loop(unique_id, auth_key):
 
 
 def get_current_model_name():
-    """Get current classification model name."""
     return load_model_config().get("selected_model", "AI4GAmazonClassification")
 
 
 def get_current_labels():
-    """Get current label dictionary."""
-    return load_model_config().get("lables", DEFAULT_MODEL_CONFIG["lables"])
+    cfg = load_model_config()
+    # accept either "lables" (legacy) or "labels" (if server fixed spelling)
+    return cfg.get("lables") or cfg.get("labels") or DEFAULT_MODEL_CONFIG["lables"]
 
 
 def is_classification_enabled():
-    """Whether classification is enabled."""
     return load_model_config().get("classification_enabled", True)
 
 
 def is_keep_blanks_enabled():
-    """Whether blank images should be kept."""
     return load_model_config().get("keep_blanks", False)
 
 
 def get_detection_threshold():
-    """Get detection confidence threshold."""
     cfg = load_model_config()
     return cfg.get("detection_threshold", DEFAULT_MODEL_CONFIG["detection_threshold"])
 
@@ -198,7 +218,6 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 def load_font():
-    """Return a Pillow built-in bitmap font."""
     return ImageFont.load_default()
 
 
@@ -222,14 +241,18 @@ def letterbox(im, new_shape=(640, 640), auto=False, scaleFill=False, scaleup=Tru
         r = (new_shape[1] / shape[1], new_shape[0] / shape[0])
     dw /= 2
     dh /= 2
-    # Resize
     if shape[::-1] != new_unpad:
-        resize_transform = T.Resize(new_unpad[::-1], interpolation=T.InterpolationMode.BILINEAR, antialias=False)
+        resize_transform = T.Resize(
+            new_unpad[::-1],
+            interpolation=T.InterpolationMode.BILINEAR,
+            antialias=False,
+        )
         im = resize_transform(im)
-    # Pad
     padding = (
-        int(round(dw - 0.1)), int(round(dw + 0.1)),
-        int(round(dh + 0.1)), int(round(dh - 0.1))
+        int(round(dw - 0.1)),
+        int(round(dw + 0.1)),
+        int(round(dh + 0.1)),
+        int(round(dh - 0.1)),
     )
     im = F.pad(im * 255.0, padding, value=114) / 255.0
     return im
@@ -241,10 +264,7 @@ colors = ["red", "blue", "purple"]
 
 
 def preprocess_classification(img):
-    """
-    Preprocess a PIL image for classification:
-    Resizes to 224x224, converts to tensor -> numpy [1,3,224,224].
-    """
+    """Preprocess PIL image for classification -> numpy [1,3,224,224] FP32."""
     img = img.resize((224, 224))
     img_tensor = T.ToTensor()(img)
     img_np = img_tensor.numpy()
@@ -252,15 +272,84 @@ def preprocess_classification(img):
     return img_np
 
 
-# Triton / IO Setup
-TRITON_URL = (os.getenv("TRITON_SERVER_URL") or os.getenv("TRITON_URL", "http://triton:8000")).strip().rstrip("/")
-if TRITON_URL.startswith(("http://", "https://")):
-    TRITON_URL = TRITON_URL.split("://", 1)[1]
+# --------- ONNX inference wrappers (only) ----------
+md_ort_session = None
+clf_ort_sessions = {}  # model_name -> session
 
-client = httpclient.InferenceServerClient(url=TRITON_URL, network_timeout=600.0)
 
-# Megadetector model
-megadetector_model_name = "megadetectorv6"
+def _ensure_ort_ready() -> bool:
+    if not HAVE_ORT or ort is None:
+        log.error("onnxruntime is not installed. Cannot run inference.")
+        return False
+    if not LOCAL_MODELS_DIR:
+        log.error("LOCAL_MODELS_DIR is not set. Cannot locate ONNX models.")
+        return False
+    return True
+
+
+def _get_megadetector_onnx_session():
+    global md_ort_session
+    if md_ort_session is not None:
+        return md_ort_session
+    if not _ensure_ort_ready():
+        return None
+    md_path = os.path.join(LOCAL_MODELS_DIR, "megadetectorv6", "1", "model.onnx")
+    if not os.path.isfile(md_path):
+        log.error(f"MegaDetector ONNX model not found at: {md_path}")
+        return None
+    log.info(f"Loading MegaDetector ONNX model from {md_path}")
+    md_ort_session = ort.InferenceSession(md_path, providers=["CPUExecutionProvider"])
+    return md_ort_session
+
+
+def _get_classifier_onnx_session(model_name: str):
+    global clf_ort_sessions
+    if model_name in clf_ort_sessions:
+        return clf_ort_sessions[model_name]
+    if not _ensure_ort_ready():
+        return None
+    clf_path = os.path.join(LOCAL_MODELS_DIR, model_name, "1", "model.onnx")
+    if not os.path.isfile(clf_path):
+        log.error(f"Classifier ONNX model not found at: {clf_path}")
+        return None
+    log.info(f"Loading classifier ONNX model '{model_name}' from {clf_path}")
+    sess = ort.InferenceSession(clf_path, providers=["CPUExecutionProvider"])
+    clf_ort_sessions[model_name] = sess
+    return sess
+
+
+def run_megadetector(image_np: np.ndarray):
+    """Run MegaDetector with ONNXRuntime. Returns output ndarray or None."""
+    sess = _get_megadetector_onnx_session()
+    if sess is None:
+        return None
+    try:
+        input_name = sess.get_inputs()[0].name
+        outputs = sess.run(None, {input_name: image_np.astype(np.float32)})
+        return outputs[0]
+    except Exception as e:
+        log.error(f"ONNX MegaDetector inference failed: {e}")
+        return None
+
+
+def run_classifier(cropped_np: np.ndarray, model_name: str):
+    """Run classifier with ONNXRuntime. Returns 1D probs or None."""
+    sess = _get_classifier_onnx_session(model_name)
+    if sess is None:
+        return None
+    try:
+        input_name = sess.get_inputs()[0].name
+        outputs = sess.run(None, {input_name: cropped_np.astype(np.float32)})
+        logits = outputs[0][0].astype(np.float32, copy=False)
+        exp_scores = np.exp(logits - np.max(logits))
+        probs = exp_scores / np.sum(exp_scores)
+        return probs
+    except Exception as e:
+        log.error(f"ONNX classifier '{model_name}' inference failed: {e}")
+        return None
+
+
+# ------------------------------------------------------
 
 # Input and output directories
 input_dir = "/app/images/"
@@ -268,37 +357,21 @@ output_dir = "/app/static/gallery/"
 os.makedirs(output_dir, exist_ok=True)
 
 # CSV for logging detections
-csv_file = '/app/static/data/detections.csv'
+csv_file = "/app/static/data/detections.csv"
 os.makedirs(os.path.dirname(csv_file), exist_ok=True)
 
 
 def write_to_csv(image_name, detection, confidence, date):
-    """Append detection results to CSV."""
     file_exists = os.path.isfile(csv_file)
-    with open(csv_file, mode='a', newline='') as file:
+    with open(csv_file, mode="a", newline="") as file:
         writer = csv.writer(file)
         if not file_exists:
-            writer.writerow(['Image Name', 'Detection', 'Confidence Score', 'Date'])
+            writer.writerow(["Image Name", "Detection", "Confidence Score", "Date"])
         writer.writerow([image_name, detection, confidence, date])
 
 
 def save_jpeg_with_boxes(img, boxes_meta, out_path):
-    """
-    Save a JPEG with bounding boxes stored as JSON in EXIF UserComment.
-
-    boxes_meta: list of dicts, each like:
-      {
-        "x1": float (normalized 0-1),
-        "y1": float,
-        "x2": float,
-        "y2": float,
-        "label": str,
-        "score": float,
-        "class_id": int,
-        "source": str,
-        "model": str or None
-      }
-    """
+    """Save JPEG with boxes metadata stored as JSON in EXIF UserComment."""
     exif_bytes_in = img.info.get("exif", b"")
     if exif_bytes_in:
         try:
@@ -309,11 +382,25 @@ def save_jpeg_with_boxes(img, boxes_meta, out_path):
         exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
 
     payload = json.dumps(boxes_meta).encode("utf-8")
-    # EXIF UserComment should start with an encoding prefix
     exif_dict["Exif"][piexif.ExifIFD.UserComment] = b"ASCII\0\0\0" + payload
-
     exif_bytes_out = piexif.dump(exif_dict)
     img.save(out_path, format="JPEG", exif=exif_bytes_out)
+
+
+def save_sidecar_metadata(out_path, image_name, captured_at_iso, img_w, img_h, pixel_boxes):
+    """Write <out_path>.json (sibling of the JPEG) with server-ready metadata."""
+    sidecar = {
+        "image_name": image_name,
+        "captured_at": captured_at_iso,
+        "image_width": img_w,
+        "image_height": img_h,
+        "detections": pixel_boxes,
+    }
+    side_path = os.path.splitext(out_path)[0] + ".json"
+    tmp = side_path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(sidecar, f)
+    os.replace(tmp, side_path)
 
 
 # Background Settings Fetch
@@ -335,211 +422,253 @@ if AUTH_KEY and UNIQUE_ID:
     model_thread = threading.Thread(
         target=model_settings_fetch_loop,
         args=(UNIQUE_ID, AUTH_KEY),
-        daemon=True
+        daemon=True,
     )
     model_thread.start()
 
+log.info(
+    f"ONNXRuntime-only mode. HAVE_ORT={HAVE_ORT}, LOCAL_MODELS_DIR={LOCAL_MODELS_DIR}, "
+    f"ONLY_SAVE_ANIMALS={ONLY_SAVE_ANIMALS}, DRAW_BOXES={DRAW_BOXES}"
+)
+
 # Main Processing Loop
 while True:
-    for image_name in os.listdir(input_dir):
-        if image_name.lower().endswith(('.png', '.jpg', '.jpeg')):
-            image_path = os.path.join(input_dir, image_name)
-            print(f"Opening {image_path}")
-            attempt = 0
-            while attempt < 3:
-                if attempt != 0:
-                    time.sleep(5)
-                print(f"Attempt {attempt}")
-                try:
-                    image = Image.open(image_path).convert("RGB")
-                    break
-                except Exception as e:
-                    print(e)
-                    attempt += 1
-            if attempt == 3:
+    try:
+        names = os.listdir(input_dir)
+    except Exception as e:
+        log.error(f"Failed to list input_dir={input_dir}: {e}")
+        time.sleep(5)
+        continue
+
+    for image_name in names:
+        if not image_name.lower().endswith((".png", ".jpg", ".jpeg")):
+            continue
+
+        image_path = os.path.join(input_dir, image_name)
+        log.info(f"Processing: {image_path}")
+
+        # Try opening a few times (handles files still being written)
+        attempt = 0
+        image = None
+        while attempt < 3:
+            if attempt != 0:
+                time.sleep(5)
+            try:
+                image = Image.open(image_path).convert("RGB")
+                break
+            except Exception as e:
+                log.warning(f"Open failed (attempt {attempt+1}/3) for {image_path}: {e}")
+                attempt += 1
+
+        if image is None:
+            try:
                 os.remove(image_path)
-                print(f"Removed {image_path} without processing.")
-                continue
+                log.warning(f"Removed {image_path} without processing (could not open).")
+            except Exception as e:
+                log.error(f"Failed to remove {image_path}: {e}")
+            continue
 
-            # Prepare image for MegaDetector
-            img_lb = letterbox(image, new_shape=(640, 640), auto=False, stride=32)
-            image_np = img_lb.numpy()
-            image_np = np.expand_dims(image_np, axis=0)
+        # Prepare image for MegaDetector
+        img_lb = letterbox(image, new_shape=(640, 640), auto=False, stride=32)
+        image_np = img_lb.numpy()
+        image_np = np.expand_dims(image_np, axis=0).astype(np.float32)
 
-            md_inputs = [httpclient.InferInput("images", image_np.shape, "FP32")]
-            md_inputs[0].set_data_from_numpy(image_np)
-            md_outputs = [httpclient.InferRequestedOutput("output0")]
+        # MegaDetector inference
+        output_data = run_megadetector(image_np)
+        if output_data is None:
+            log.error(f"MegaDetector inference failed for {image_name}; treating as blank.")
+            try:
+                date_str = image_name.split("_")[-1].split(".")[0][:14]
+                date = datetime.strptime(date_str, "%Y%m%d%H%M%S")
+            except Exception:
+                date = datetime.utcnow()
 
-            md_results = client.infer(megadetector_model_name, md_inputs, outputs=md_outputs)
-            output_data = md_results.as_numpy("output0")
-            print(f"MegaDetector output shape: {output_data.shape}")
+            if is_keep_blanks_enabled():
+                write_to_csv(image_name, "blank", 0.0, date)
+                image.save(os.path.join(output_dir, image_name))
+                log.info(f"Saved blank image to {output_dir}")
 
-            # Extract datetime from filename
-            date_str = image_name.split('_')[-1].split('.')[0][:14]
-            date = datetime.strptime(date_str, '%Y%m%d%H%M%S')
+            try:
+                os.remove(image_path)
+            except Exception as e:
+                log.error(f"Failed to remove {image_path}: {e}")
+            continue
 
-            # Non-max suppression
-            conf_thres = get_detection_threshold()
+        # Extract datetime from filename
+        try:
+            date_str = image_name.split("_")[-1].split(".")[0][:14]
+            date = datetime.strptime(date_str, "%Y%m%d%H%M%S")
+        except Exception:
+            date = datetime.utcnow()
+
+        # Non-max suppression
+        conf_thres = get_detection_threshold()
+        try:
             pred = non_max_suppression(
                 torch.tensor(output_data),
                 conf_thres=conf_thres,
                 iou_thres=0.5,
-                agnostic=False
+                agnostic=False,
             )[0].numpy()
-            print(f"MegaDetector predictions: {pred}")
+        except Exception as e:
+            log.error(f"NMS failed for {image_name}: {e}")
+            pred = np.array([])
 
-            # Handle blank
-            if pred.size == 0:
-                if is_keep_blanks_enabled():
-                    write_to_csv(image_name, "blank", 1.0, date)
-                    os.makedirs(output_dir, exist_ok=True)
-                    image.save(os.path.join(output_dir, image_name))
-                    print(f"Saved blank image to {output_dir}")
+        # Handle blank
+        if pred.size == 0:
+            if is_keep_blanks_enabled():
+                write_to_csv(image_name, "blank", 1.0, date)
+                image.save(os.path.join(output_dir, image_name))
+                log.info(f"Saved blank image to {output_dir}")
+            try:
                 os.remove(image_path)
-                print(f"Removed source file {image_path} (blank)")
+            except Exception as e:
+                log.error(f"Failed to remove {image_path}: {e}")
+            continue
+
+        # Scale boxes back to original image size
+        pred[:, :4] = scale_boxes([640, 640], pred[:, :4], np.array(image).shape)
+
+        xyxy = pred[:, :4]
+        md_confidence = pred[:, 4]
+        md_class_id = pred[:, 5].astype(int)
+
+        font = load_font()
+        drew_any = False
+        skipped_count = 0
+
+        boxes_meta = []
+        pixel_boxes = []
+        img_w, img_h = image.size
+
+        annotated_img = image.copy() if DRAW_BOXES else image
+        draw = ImageDraw.Draw(annotated_img) if DRAW_BOXES else None
+
+        for i in range(len(pred)):
+            cls_id = int(md_class_id[i])
+
+            if ONLY_SAVE_ANIMALS and cls_id in (1, 2):
+                skipped_count += 1
                 continue
 
-            if len(pred) > 0:
-                # Scale boxes back to original image size
-                pred[:, :4] = scale_boxes([640, 640], pred[:, :4], np.array(image).shape)
-                xyxy = pred[:, :4]
-                md_confidence = pred[:, 4]
-                md_class_id = pred[:, 5].astype(int)
+            md_label = class_name_to_id.get(cls_id, "unknown")
+            det_conf = float(md_confidence[i])
+            x1, y1, x2, y2 = [float(v) for v in xyxy[i]]
 
-                font = load_font()
+            # Run classification only for animals if enabled
+            if cls_id == 0 and is_classification_enabled():
+                cropped = image.crop((x1, y1, x2, y2))
+                cropped_np = preprocess_classification(cropped)
 
-                drew_any = False            # we had at least one kept detection
-                skipped_count = 0           # how many non-animal detections we skip
+                current_model_name = get_current_model_name()
+                probs = run_classifier(cropped_np, current_model_name)
 
-                # Metadata for EXIF (one dict per detection)
-                boxes_meta = []
-                img_w, img_h = image.size
-
-                # Only create drawing context if we actually want boxes rendered
-                annotated_img = image.copy() if DRAW_BOXES else image
-                draw = ImageDraw.Draw(annotated_img) if DRAW_BOXES else None
-
-                for i in range(len(pred)):
-                    cls_id = md_class_id[i]
-
-                    # Skip non-animals (person=1, vehicle=2) if ONLY_SAVE_ANIMALS is enabled
-                    if ONLY_SAVE_ANIMALS and cls_id in (1, 2):
-                        try:
-                            x1_s, y1_s, x2_s, y2_s = [float(v) for v in xyxy[i]]
-                        except Exception:
-                            x1_s = y1_s = x2_s = y2_s = -1.0
-                        label_skipped = "person" if cls_id == 1 else "vehicle"
-                        conf_s = float(md_confidence[i])
-                        log.info(
-                            f"Skipping {label_skipped} (conf={conf_s:.2f}) due to ONLY_SAVE_ANIMALS; "
-                            f"image={image_name}, box=({x1_s:.1f},{y1_s:.1f},{x2_s:.1f},{y2_s:.1f})"
-                        )
-                        skipped_count += 1
-                        continue
-
-                    md_label = class_name_to_id[cls_id]
-                    det_conf = md_confidence[i]
-                    x1, y1, x2, y2 = xyxy[i]
-
-                    # Only run classification if it's an "animal" AND classification is enabled
-                    if cls_id == 0 and is_classification_enabled():
-                        cropped = image.crop((x1, y1, x2, y2))
-                        cropped_np = preprocess_classification(cropped)
-
-                        clf_inputs = [httpclient.InferInput("input", cropped_np.shape, "FP32")]
-                        clf_inputs[0].set_data_from_numpy(cropped_np)
-                        clf_outputs = [httpclient.InferRequestedOutput("output")]
-
-                        current_model_name = get_current_model_name()
-                        clf_results = client.infer(current_model_name, clf_inputs, outputs=clf_outputs)
-
-                        clf_output = clf_results.as_numpy("output")  # [1, 36]
-                        exp_scores = np.exp(clf_output[0])
-                        probs = exp_scores / np.sum(exp_scores)
-                        pred_class = int(np.argmax(probs))
-                        clf_conf = float(np.max(probs))
-
-                        labels_dict = get_current_labels()
-                        detected_class = labels_dict.get(str(pred_class), "Unknown")
-                        if clf_conf < 0.8:
-                            detected_class = "Unknown"
-
-                        write_to_csv(image_name, detected_class, clf_conf, date)
-                        label = f"{detected_class} {clf_conf:.2f}"
-
-                        stored_label = detected_class
-                        stored_conf = clf_conf
-                        stored_model = current_model_name
-                    else:
-                        # For person/vehicle, or if classification disabled, use MD label only
-                        write_to_csv(image_name, md_label, det_conf, date)
-                        label = f"{md_label} {det_conf:.2f}"
-
-                        stored_label = md_label
-                        stored_conf = float(det_conf)
-                        stored_model = None
-
-                    # Optionally draw bounding box and label
-                    if DRAW_BOXES and draw is not None:
-                        draw.rectangle(xyxy[i], outline=colors[cls_id], width=2)
-                        text_bbox = draw.textbbox((xyxy[i][0], xyxy[i][1] - 20), label, font=font)
-                        draw.rectangle(
-                            [text_bbox[0], text_bbox[1] - 2, text_bbox[2] + 2, text_bbox[3] + 2],
-                            fill=colors[cls_id]
-                        )
-                        draw.text((xyxy[i][0] + 2, xyxy[i][1] - 20), label, font=font, fill='white')
-
-                    drew_any = True  # we have at least one kept detection
-
-                    # Store normalized coordinates + label in metadata list
-                    norm_x1 = float(x1) / float(img_w)
-                    norm_y1 = float(y1) / float(img_h)
-                    norm_x2 = float(x2) / float(img_w)
-                    norm_y2 = float(y2) / float(img_h)
-
-                    boxes_meta.append(
-                        {
-                            "x1": norm_x1,
-                            "y1": norm_y1,
-                            "x2": norm_x2,
-                            "y2": norm_y2,
-                            "label": stored_label,
-                            "score": float(stored_conf),
-                            "class_id": int(cls_id),
-                            "source": "megadetectorv6",
-                            "model": stored_model,
-                        }
-                    )
-
-                # Per-image summary for skipped detections
-                if ONLY_SAVE_ANIMALS and skipped_count:
-                    log.info(f"{image_name}: skipped {skipped_count} non-animal detection(s) due to ONLY_SAVE_ANIMALS")
-
-                # If we filtered out everything (e.g., only people/vehicles), treat as blank
-                if not drew_any:
-                    if is_keep_blanks_enabled():
-                        write_to_csv(image_name, "blank", 1.0, date)
-                        os.makedirs(output_dir, exist_ok=True)
-                        image.save(os.path.join(output_dir, image_name))
-                        print(f"Saved blank image to {output_dir}")
-                    os.remove(image_path)
-                    print(f"Removed source file {image_path} (all detections filtered)")
-                    continue
-
-                # Save image: if DRAW_BOXES=True, save annotated image; otherwise save original.
-                out_path = os.path.join(output_dir, image_name)
-                img_to_save = annotated_img if DRAW_BOXES else image
-
-                if image_name.lower().endswith((".jpg", ".jpeg")):
-                    save_jpeg_with_boxes(img_to_save, boxes_meta, out_path)
+                if probs is None or probs.size == 0:
+                    detected_class = md_label
+                    clf_conf = det_conf
+                    stored_model = None
                 else:
-                    img_to_save.save(out_path)
+                    pred_class = int(np.argmax(probs))
+                    clf_conf = float(np.max(probs))
+                    labels_dict = get_current_labels()
+                    detected_class = labels_dict.get(str(pred_class), "Unknown")
+                    if clf_conf < 0.8:
+                        detected_class = "Unknown"
+                    stored_model = current_model_name
 
-                print(f"Saved {out_path}")
+                write_to_csv(image_name, detected_class, clf_conf, date)
+                label_text = f"{detected_class} {clf_conf:.2f}"
 
-            # Remove original after processing
+                stored_label = detected_class
+                stored_conf = clf_conf
+            else:
+                # Person/vehicle, or classification disabled
+                write_to_csv(image_name, md_label, det_conf, date)
+                label_text = f"{md_label} {det_conf:.2f}"
+
+                stored_label = md_label
+                stored_conf = det_conf
+                stored_model = None
+
+            # Optionally draw
+            if DRAW_BOXES and draw is not None:
+                draw.rectangle([x1, y1, x2, y2], outline=colors[cls_id] if cls_id in (0, 1, 2) else "white", width=2)
+                text_bbox = draw.textbbox((x1, y1 - 20), label_text, font=font)
+                draw.rectangle(
+                    [text_bbox[0], text_bbox[1] - 2, text_bbox[2] + 2, text_bbox[3] + 2],
+                    fill=colors[cls_id] if cls_id in (0, 1, 2) else "black",
+                )
+                draw.text((x1 + 2, y1 - 20), label_text, font=font, fill="white")
+
+            drew_any = True
+
+            # Store normalized coordinates + label in metadata list
+            norm_x1 = x1 / float(img_w)
+            norm_y1 = y1 / float(img_h)
+            norm_x2 = x2 / float(img_w)
+            norm_y2 = y2 / float(img_h)
+
+            boxes_meta.append(
+                {
+                    "x1": float(norm_x1),
+                    "y1": float(norm_y1),
+                    "x2": float(norm_x2),
+                    "y2": float(norm_y2),
+                    "label": stored_label,
+                    "score": float(stored_conf),
+                    "class_id": int(cls_id),
+                    "source": "megadetectorv6",
+                    "model": stored_model,
+                }
+            )
+
+            pixel_boxes.append(
+                {
+                    "label": stored_label,
+                    "confidence": float(stored_conf),
+                    "bbox": [int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2))],
+                    "class_id": int(cls_id),
+                }
+            )
+
+        if ONLY_SAVE_ANIMALS and skipped_count:
+            log.info(f"{image_name}: skipped {skipped_count} non-animal detection(s) due to ONLY_SAVE_ANIMALS")
+
+        # If we filtered everything out, treat as blank
+        if not drew_any:
+            if is_keep_blanks_enabled():
+                write_to_csv(image_name, "blank", 1.0, date)
+                image.save(os.path.join(output_dir, image_name))
+                log.info(f"Saved blank image to {output_dir}")
+            try:
+                os.remove(image_path)
+            except Exception as e:
+                log.error(f"Failed to remove {image_path}: {e}")
+            continue
+
+        # Save output image
+        out_path = os.path.join(output_dir, image_name)
+        img_to_save = annotated_img if DRAW_BOXES else image
+
+        try:
+            if image_name.lower().endswith((".jpg", ".jpeg")):
+                save_jpeg_with_boxes(img_to_save, boxes_meta, out_path)
+            else:
+                img_to_save.save(out_path)
+        except Exception as e:
+            log.error(f"Failed to save output image {out_path}: {e}")
+
+        try:
+            captured_at_iso = date.strftime("%Y-%m-%dT%H:%M:%SZ")
+            save_sidecar_metadata(out_path, image_name, captured_at_iso, img_w, img_h, pixel_boxes)
+        except Exception as e:
+            log.error(f"Failed to write sidecar JSON for {out_path}: {e}")
+
+        # Remove original after processing
+        try:
             os.remove(image_path)
-            print(f"Removed {image_path}")
+        except Exception as e:
+            log.error(f"Failed to remove {image_path}: {e}")
 
     # Check new images every 10s
     time.sleep(10)

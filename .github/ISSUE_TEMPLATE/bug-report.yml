@@ -32,7 +32,7 @@ body:
       description: Please specify the software and hardware you used to produce the bug.
       placeholder: |
         - SPARROW version / commit hash:
-        - Hardware: Jetson Orin Nano / other
+        - Hardware: Raspberry Pi / other
         - OS: Ubuntu 22.04
         - Docker version:
     validations:

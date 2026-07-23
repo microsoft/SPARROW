@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   sparrow:
@@ -7,9 +7,7 @@ services:
     container_name: sparrow_service
     env_file:
       - ./sparrow.env
-    ports:
-      - "25:25" # SMTP server port
-      - "21:21" # FTP server port
+    network_mode: host
     volumes:
       - ./sparrow/config:/app/config
       - ./sparrow/images:/app/images
@@ -19,9 +17,10 @@ services:
       - /sys:/host/sys:ro
       - /proc:/host/proc:ro
       - /etc/unique_id:/host/etc/unique_id:ro
+      - /dev/serial:/dev/serial:ro
       - ./Models/tritonserver/model_repository:/home/sparrow/Desktop/system/Models/tritonserver/model_repository
-    networks:
-      - sparrow_network
+    devices:
+      - /dev/serial/by-id/usb-FTDI_FT231X_USB_UART_DU0D4EKZ-if00-port0:/dev/xbee_serial
     privileged: true
     restart: unless-stopped
 
@@ -32,32 +31,16 @@ services:
     container_name: starlink_tools_container
     env_file:
       - ./starlink.env
+    networks:
+      - sparrow_network
     volumes:
       - ./starlink/config:/app/config
       - ./starlink/logs:/app/logs
       - /sys:/host/sys:ro
       - /proc:/host/proc:ro
       - /etc/unique_id:/host/etc/unique_id:ro
-    networks:
-      - sparrow_network
+      - /dev/serial:/dev/serial:ro
     privileged: true
-    restart: unless-stopped
-
-  triton:
-    image: nvcr.io/nvidia/tritonserver:24.06-py3-igpu
-    container_name: triton_server
-    runtime: nvidia
-    environment:
-      - OMP_NUM_THREADS=2
-    ports:
-      - "8000:8000" # HTTP Inference API
-      - "8001:8001" # gRPC Inference API
-      - "8002:8002" # Metrics API
-    volumes:
-      - ./Models/tritonserver/model_repository:/models
-    command: tritonserver --model-repository=/models --model-control-mode=explicit --strict-readiness=false
-    networks:
-      - sparrow_network
     restart: unless-stopped
 
 networks:

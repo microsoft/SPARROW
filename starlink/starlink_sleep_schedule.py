@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Manages Starlink power on a Jetson using a GPIO relay: it fetches a sleep/wake
-window from the server, reads battery voltage via VE.Direct (/dev/ttyUSB0),
-and toggles power accordingly. It avoids cutting power during Starlink updates
-(using gRPC status + optional reboot to install).
+Manages Starlink power on a Raspberry Pi using a GPIO relay: it fetches a
+sleep/wake window from the server, reads battery voltage via VE.Direct, and
+toggles power accordingly. It avoids cutting power during Starlink updates
+(using gRPC status + optional reboot to install). The VE.Direct port is read
+from the VE_DIRECT_PORT env var, defaulting to the Victron-specific by-id
+symlink so it can't collide with the XBee FTDI adapter on /dev/ttyUSB0.
 """
 
 import os
@@ -14,14 +16,27 @@ import hashlib
 import requests
 from datetime import datetime, timezone
 import threading
-import Jetson.GPIO as GPIO
 import serial
 import sys
 from filelock import FileLock, Timeout
 from starlink_grpc import ChannelContext, status_data
 
+# ---------------------------------------------------------------------------
+# GPIO BACKEND (RPi.GPIO)
+# ---------------------------------------------------------------------------
+GPIO = None
+
+try:
+    import RPi.GPIO as _GPIO
+    GPIO = _GPIO
+except Exception:
+    GPIO = None
+
 # VE.Direct / Paths
-VE_DIRECT_PORT = "/dev/ttyUSB0"
+VE_DIRECT_PORT = os.environ.get(
+    "VE_DIRECT_PORT",
+    "/dev/serial/by-id/usb-VictronEnergy_VE.Direct_cable-if00-port0",
+)
 
 CONFIG_PATH = "/app/config/schedule_config.json"
 LOG_DIR = "/app/logs"
@@ -40,7 +55,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # REST API Endpoint & Auth
-SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrow-earth.com").rstrip("/")
+SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrowstudio.azure.com/v1").rstrip("/")
 REST_API_URL    = f"{SERVER_BASE_URL}/get_schedule"
 logger.info(f"Schedule endpoint: {REST_API_URL}")
 
@@ -49,14 +64,23 @@ try:
         AUTH_KEY = f.read().strip()
 except Exception as e:
     logging.error(f"Failed to read access key from /app/config/access_key.txt: {e}")
-    exit(1)
+    sys.exit(1)
 
+# ---------------------------------------------------------------------------
 # GPIO Relay Setup
+# ---------------------------------------------------------------------------
 PIN_RELAY = 8   # BCM 8 > mikroBUS CS > Relay 2 coil & LED (socket 1)
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(PIN_RELAY, GPIO.OUT, initial=GPIO.LOW)
 
+if GPIO is not None:
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(PIN_RELAY, GPIO.OUT, initial=GPIO.LOW)
+    logger.info(f"RPi.GPIO initialized on BCM pin {PIN_RELAY}.")
+else:
+    logger.warning("RPi.GPIO not available. Relay control will be disabled.")
+
+# ---------------------------------------------------------------------------
 # Hardware ID Retrieval
+# ---------------------------------------------------------------------------
 def get_hardware_id():
     """
     Retrieve a unique hardware ID based on a stored UUID.
@@ -83,7 +107,9 @@ def get_hardware_id():
         logger.error(f"Failed to retrieve hardware ID: {e}")
         raise
 
+# ---------------------------------------------------------------------------
 # VE.Direct Helpers
+# ---------------------------------------------------------------------------
 def read_vedirect_battery_voltage(port=VE_DIRECT_PORT):
     """
     Open VE.Direct at 19 200 baud, look for the 'V' (battery voltage in mV) register,
@@ -116,7 +142,9 @@ def read_vedirect_battery_voltage(port=VE_DIRECT_PORT):
         logger.error(f"VE.Direct port open error: {e}")
         return None
 
+# ---------------------------------------------------------------------------
 # Schedule Load/Save
+# ---------------------------------------------------------------------------
 def load_local_schedule():
     """Load the local sleep schedule from the configuration file."""
     try:
@@ -155,18 +183,28 @@ def convert_to_utc_minutes(local_time_str):
         logger.error(f"Invalid time format '{local_time_str}': {e}")
         return None
 
+# ---------------------------------------------------------------------------
 # Relay Control (GPIO only)
+# ---------------------------------------------------------------------------
 def turn_on_starlink():
     """Power ON Starlink via GPIO relay."""
+    if GPIO is None:
+        logger.warning("Requested Starlink ON, but no GPIO backend available.")
+        return
     GPIO.output(PIN_RELAY, GPIO.LOW)
     logger.info("Starlink turned ON (GPIO)")
 
 def turn_off_starlink():
     """Power OFF Starlink via GPIO relay."""
+    if GPIO is None:
+        logger.warning("Requested Starlink OFF, but no GPIO backend available.")
+        return
     GPIO.output(PIN_RELAY, GPIO.HIGH)
     logger.info("Starlink turned OFF (GPIO)")
 
+# ---------------------------------------------------------------------------
 # Update Status / Control
+# ---------------------------------------------------------------------------
 def is_update_in_progress():
     """
     Check if a Starlink software update is in progress using the starlink_grpc package.
@@ -237,7 +275,9 @@ def log_update_status_periodically(poll_interval=300):
         logger.info(f"(Periodic) Starlink update status: {status}")
         time.sleep(poll_interval)
 
+# ---------------------------------------------------------------------------
 # Schedule Application
+# ---------------------------------------------------------------------------
 def apply_schedule(schedule):
     """
     Apply the sleep/wake schedule using GPIO relay control,
@@ -287,12 +327,18 @@ def apply_schedule(schedule):
     except Exception as e:
         logger.error(f"Error applying schedule: {e}")
 
+# ---------------------------------------------------------------------------
 # Remote Schedule Fetch
+# ---------------------------------------------------------------------------
 def fetch_remote_schedule(unique_id):
     """Fetch the schedule from the REST API."""
     try:
         payload = {"unique_id": unique_id, "auth_key": AUTH_KEY}
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+            "X-API-Key": AUTH_KEY,
+            "X-Unit-ID": unique_id,
+        }
         logger.info(f"Fetching remote schedule for {unique_id}")
         response = requests.post(REST_API_URL, json=payload, headers=headers, timeout=10)
         if response.status_code == 200:
@@ -319,7 +365,9 @@ def schedules_are_different(local_schedule, remote_schedule):
     return (local_schedule.get("start_time") != remote_schedule.get("start_time") or
             local_schedule.get("end_time")   != remote_schedule.get("end_time"))
 
+# ---------------------------------------------------------------------------
 # Main
+# ---------------------------------------------------------------------------
 def main():
     logger.info("Starting Starlink sleep schedule manager...")
     unique_id = get_hardware_id()
@@ -340,10 +388,15 @@ def main():
                 logger.warning("No schedule available.")
             time.sleep(120)
     finally:
-        GPIO.cleanup()
-        logger.info("GPIO cleaned up; exiting.")
+        if GPIO is not None:
+            GPIO.cleanup()
+            logger.info("GPIO cleaned up; exiting.")
+        else:
+            logger.info("No GPIO backend to clean up; exiting.")
 
+# ---------------------------------------------------------------------------
 # Entry Point (Single-Instance)
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     LOCK_PATH = "/tmp/starlink_schedule.lock"
     try:
