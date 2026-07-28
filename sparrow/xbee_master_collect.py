@@ -134,12 +134,14 @@ def open_serial_forever(port: str, baud: int, logger: logging.Logger, timeout: f
 
             try:
                 ser.reset_input_buffer()
-            except Exception:
+            except (serial.SerialException, OSError):
+                # Buffer reset is best-effort on freshly-opened ports; ignore.
                 pass
 
             try:
                 ser.reset_output_buffer()
-            except Exception:
+            except (serial.SerialException, OSError):
+                # Buffer reset is best-effort on freshly-opened ports; ignore.
                 pass
 
             time.sleep(0.5)
@@ -224,14 +226,14 @@ def main():
     # File-type routing. Robin sends `.jpg` images alongside `.mp3` audio over the
     # same XBee link; we split them at save time so each downstream pipeline
     # (inference.py for images, rest_client for audio) finds only what it expects.
-    IMAGE_EXTS = (".jpg", ".jpeg", ".png")
     AUDIO_EXTS = (".mp3", ".wav")
 
     def out_dir_for(name: str) -> str:
         ext = os.path.splitext(name)[1].lower()
         if ext in AUDIO_EXTS:
             return audio_out
-        # Unknown extensions land with images so they're visible and not silently dropped.
+        # Image and unknown extensions land in args.out so they're visible
+        # to inference.py and not silently dropped.
         return args.out
 
     dev_queues: dict[int, deque] = {}
@@ -250,14 +252,14 @@ def main():
         return (cur % 255) + 1
 
     def send_to(src64_int: int, rf: bytes):
-        nonlocal frame_id, ser
+        nonlocal frame_id
         tx = build_tx_request_0x10(frame_id, src64_int, rf)
         ser.write(tx)
         ser.flush()
         frame_id = next_frame_id(frame_id)
 
     def reset_link_state(reason: str):
-        nonlocal active, sessions, master_id_logged
+        nonlocal active, master_id_logged
         if active is not None or sessions:
             logger.warning(
                 "LINK reset reason=%s clearing active=%s partial_sessions=%d",
@@ -270,7 +272,7 @@ def main():
         master_id_logged = False
 
     def log_local_xbee_identity():
-        nonlocal master_id_logged, ser
+        nonlocal master_id_logged
         if master_id_logged or ser is None:
             return
 
@@ -427,7 +429,8 @@ def main():
                         logger.warning("No serial frames for %.1fs; reopening port", args.serial_idle_reopen)
                         try:
                             ser.close()
-                        except Exception:
+                        except (serial.SerialException, OSError):
+                            # Port is already unhealthy; best-effort close before reopen.
                             pass
                         ser = None
                         reset_link_state("serial-idle")
@@ -590,7 +593,8 @@ def main():
                 try:
                     if ser is not None:
                         ser.close()
-                except Exception:
+                except (serial.SerialException, OSError):
+                    # Port is already unhealthy; best-effort close before reopen.
                     pass
                 ser = None
                 reset_link_state("serial-fault")
@@ -601,7 +605,8 @@ def main():
                 try:
                     if ser is not None:
                         ser.close()
-                except Exception:
+                except (serial.SerialException, OSError):
+                    # Port is already unhealthy; best-effort close before reopen.
                     pass
                 ser = None
                 reset_link_state("unhandled-exception")
@@ -613,7 +618,8 @@ def main():
         try:
             if ser is not None:
                 ser.close()
-        except Exception:
+        except (serial.SerialException, OSError):
+            # Shutdown cleanup; best-effort.
             pass
 
 

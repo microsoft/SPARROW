@@ -303,7 +303,6 @@ def _get_megadetector_onnx_session():
 
 
 def _get_classifier_onnx_session(model_name: str):
-    global clf_ort_sessions
     if model_name in clf_ort_sessions:
         return clf_ort_sessions[model_name]
     if not _ensure_ort_ready():

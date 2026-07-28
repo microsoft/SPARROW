@@ -5,11 +5,10 @@ import time
 from typing import List, Optional, Sequence, Tuple, Union
 import numpy as np
 import torch
-from torch import Tensor
 from torchvision.ops import nms as tv_nms
 from torchvision.ops import batched_nms as tv_batched_nms
 
-ArrayLike = Union[np.ndarray, Tensor]
+ArrayLike = Union[np.ndarray, torch.Tensor]
 
 
 def _is_tensor(x: ArrayLike) -> bool:
@@ -102,14 +101,14 @@ def scale_boxes(
 
 @torch.no_grad()
 def non_max_suppression(
-    prediction: Tensor,
+    prediction: torch.Tensor,
     conf_thres: float = 0.25,
     iou_thres: float = 0.45,
     classes: Optional[Sequence[int]] = None,
     agnostic: bool = False,
     max_det: int = 300,
     max_time_img: float = 0.05,
-) -> List[Tensor]:
+) -> List[torch.Tensor]:
     """
     Generic NMS that supports multiple common formats and **auto-detects layout**:
 
@@ -141,7 +140,7 @@ def non_max_suppression(
 
     B, N, C = prediction.shape
     t_start = time.time()
-    outputs: List[Tensor] = []
+    outputs: List[torch.Tensor] = []
 
     for b in range(B):
         x = prediction[b]
@@ -172,7 +171,6 @@ def non_max_suppression(
 
         boxes_xyxy = xywh2xyxy(x[:, :4])
         scores_per_class = x[:, 4:]  # [N, K]
-        K = scores_per_class.shape[1]
 
         # Best class per box
         cls_conf, cls_idx = scores_per_class.max(dim=1)
