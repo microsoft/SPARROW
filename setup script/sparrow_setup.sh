@@ -500,15 +500,24 @@ detect_and_patch_local_devices() {
     fi
 
     if [[ -n "$actual_ftdi" ]]; then
-        if [[ -f "$compose_file" ]] && ! grep -q "$actual_ftdi" "$compose_file"; then
-            log "Patching docker-compose.yml FTDI path -> $actual_ftdi"
-            sed -i.bak -E "s|/dev/serial/by-id/usb-FTDI_[^:[:space:]]+|$actual_ftdi|g" "$compose_file"
-        else
-            log "docker-compose.yml already references local FTDI adapter"
+        if [[ -f "$compose_file" ]]; then
+            # If a previous run (with no FTDI plugged in) commented out the xbee_serial
+            # mapping, re-enable it now that an adapter is present. Idempotent: no-op if
+            # the line is already uncommented.
+            if grep -qE '^[[:space:]]*#[[:space:]]*-[[:space:]]*/dev/serial/by-id/usb-FTDI_.*:/dev/xbee_serial[[:space:]]*$' "$compose_file"; then
+                log "Re-enabling previously-disabled XBee device mapping"
+                sed -i.bak -E 's|^([[:space:]]*)#[[:space:]]*-[[:space:]]*(/dev/serial/by-id/usb-FTDI_[^:[:space:]]+:/dev/xbee_serial)[[:space:]]*$|\1- \2|' "$compose_file"
+            fi
+            if ! grep -q "$actual_ftdi" "$compose_file"; then
+                log "Patching docker-compose.yml FTDI path -> $actual_ftdi"
+                sed -i.bak -E "s|/dev/serial/by-id/usb-FTDI_[^:[:space:]]+|$actual_ftdi|g" "$compose_file"
+            else
+                log "docker-compose.yml already references local FTDI adapter"
+            fi
         fi
     else
         log "WARN: no FTDI adapter found; commenting out the XBee device mapping so containers can still start."
-        [[ -f "$compose_file" ]] && sed -i.bak -E '/^\s*-\s*\/dev\/serial\/by-id\/usb-FTDI_.*:\/dev\/xbee_serial\s*$/s/^(\s*)-/\1# -/' "$compose_file"
+        [[ -f "$compose_file" ]] && sed -i.bak -E '/^[[:space:]]*-[[:space:]]*\/dev\/serial\/by-id\/usb-FTDI_.*:\/dev\/xbee_serial[[:space:]]*$/s/^([[:space:]]*)-/\1# -/' "$compose_file"
     fi
 
     # ---- Victron VE.Direct — patch sparrow.env + starlink.env ------------
@@ -517,26 +526,10 @@ detect_and_patch_local_devices() {
         victron_dev=$(find /dev/serial/by-id -maxdepth 1 -iname "usb-VictronEnergy_*-if00-port0" -print -quit 2>/dev/null || true)
     fi
 
-    _patch_ve_direct_in_env() {
-        local envfile="$1" wanted="$2"
-        [[ -f "$envfile" ]] || return 0
-        local current
-        current=$(grep -E '^VE_DIRECT_PORT=' "$envfile" | tail -1 | cut -d= -f2- || true)
-        if [[ "$current" == "$wanted" ]]; then
-            log "$envfile: VE_DIRECT_PORT already matches"
-        elif grep -qE '^VE_DIRECT_PORT=' "$envfile"; then
-            log "Patching $envfile: VE_DIRECT_PORT -> $wanted"
-            sed -i.bak -E "s|^VE_DIRECT_PORT=.*|VE_DIRECT_PORT=$wanted|" "$envfile"
-        else
-            log "Appending VE_DIRECT_PORT=$wanted to $envfile"
-            echo "VE_DIRECT_PORT=$wanted" >>"$envfile"
-        fi
-    }
-
     if [[ -n "$victron_dev" ]]; then
         log "Found local Victron VE.Direct cable: $victron_dev"
-        _patch_ve_direct_in_env "$sparrow_env"  "$victron_dev"
-        _patch_ve_direct_in_env "$starlink_env" "$victron_dev"
+        [[ -f "$sparrow_env" ]]  && set_dotenv_kv "$sparrow_env"  VE_DIRECT_PORT "$victron_dev"
+        [[ -f "$starlink_env" ]] && set_dotenv_kv "$starlink_env" VE_DIRECT_PORT "$victron_dev"
     else
         log "No Victron VE.Direct cable found; leaving VE_DIRECT_PORT alone (harmless 'port not open' log until a cable is plugged in)."
     fi
