@@ -481,6 +481,67 @@ create_additional_directories() {
     mkdir -p "$SYSTEM_FOLDER/starlink"/{logs,config}
 }
 
+# Patch docker-compose.yml + env files so their by-id serial paths match the
+# hardware that's actually plugged into THIS Pi. The repo bakes in a specific
+# FTDI serial (from the reference deployment) and a generic Victron VE.Direct
+# name, but every FTDI adapter has a unique serial and different Victron cable
+# variants (e.g. "BV") enumerate under different names. Without this step,
+# `docker-compose up` fails on any Pi whose hardware doesn't match those two
+# strings verbatim.
+detect_and_patch_local_devices() {
+    local compose_file="$SYSTEM_FOLDER/docker-compose.yml"
+    local sparrow_env="$SYSTEM_FOLDER/sparrow.env"
+    local starlink_env="$SYSTEM_FOLDER/starlink.env"
+
+    # ---- FTDI (XBee) — patch docker-compose.yml --------------------------
+    local actual_ftdi=""
+    if [[ -d /dev/serial/by-id ]]; then
+        actual_ftdi=$(find /dev/serial/by-id -maxdepth 1 -iname "usb-FTDI_*-if00-port0" -print -quit 2>/dev/null || true)
+    fi
+
+    if [[ -n "$actual_ftdi" ]]; then
+        if [[ -f "$compose_file" ]] && ! grep -q "$actual_ftdi" "$compose_file"; then
+            log "Patching docker-compose.yml FTDI path -> $actual_ftdi"
+            sed -i.bak -E "s|/dev/serial/by-id/usb-FTDI_[^:[:space:]]+|$actual_ftdi|g" "$compose_file"
+        else
+            log "docker-compose.yml already references local FTDI adapter"
+        fi
+    else
+        log "WARN: no FTDI adapter found; commenting out the XBee device mapping so containers can still start."
+        [[ -f "$compose_file" ]] && sed -i.bak -E '/^\s*-\s*\/dev\/serial\/by-id\/usb-FTDI_.*:\/dev\/xbee_serial\s*$/s/^(\s*)-/\1# -/' "$compose_file"
+    fi
+
+    # ---- Victron VE.Direct — patch sparrow.env + starlink.env ------------
+    local victron_dev=""
+    if [[ -d /dev/serial/by-id ]]; then
+        victron_dev=$(find /dev/serial/by-id -maxdepth 1 -iname "usb-VictronEnergy_*-if00-port0" -print -quit 2>/dev/null || true)
+    fi
+
+    _patch_ve_direct_in_env() {
+        local envfile="$1" wanted="$2"
+        [[ -f "$envfile" ]] || return 0
+        local current
+        current=$(grep -E '^VE_DIRECT_PORT=' "$envfile" | tail -1 | cut -d= -f2- || true)
+        if [[ "$current" == "$wanted" ]]; then
+            log "$envfile: VE_DIRECT_PORT already matches"
+        elif grep -qE '^VE_DIRECT_PORT=' "$envfile"; then
+            log "Patching $envfile: VE_DIRECT_PORT -> $wanted"
+            sed -i.bak -E "s|^VE_DIRECT_PORT=.*|VE_DIRECT_PORT=$wanted|" "$envfile"
+        else
+            log "Appending VE_DIRECT_PORT=$wanted to $envfile"
+            echo "VE_DIRECT_PORT=$wanted" >>"$envfile"
+        fi
+    }
+
+    if [[ -n "$victron_dev" ]]; then
+        log "Found local Victron VE.Direct cable: $victron_dev"
+        _patch_ve_direct_in_env "$sparrow_env"  "$victron_dev"
+        _patch_ve_direct_in_env "$starlink_env" "$victron_dev"
+    else
+        log "No Victron VE.Direct cable found; leaving VE_DIRECT_PORT alone (harmless 'port not open' log until a cable is plugged in)."
+    fi
+}
+
 create_folders() {
     local uh
     uh=$(eval echo ~"${SUDO_USER:-$USER}")
@@ -716,6 +777,8 @@ configure_ftp_pass_in_env
 install_smbus2
 configure_access_key
 onboard_device || log "Onboarding did not complete successfully; continuing setup."
+
+detect_and_patch_local_devices
 
 log "Building Sparrow containers..."
 cd "$SYSTEM_FOLDER"
