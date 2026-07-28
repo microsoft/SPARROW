@@ -70,7 +70,8 @@ def robust_download_file(file_url: str, local_file_path: str):
         if os.path.exists(temp_file_path):
             try:
                 os.remove(temp_file_path)
-            except Exception:
+            except OSError:
+                # Best-effort cleanup of partial download; original exception is re-raised below.
                 pass
         raise
 
@@ -178,6 +179,7 @@ def sync_models(model_data: dict):
                     os.remove(fpath)
                     log.info(f"Removed extra file: {fpath}")
                 except FileNotFoundError:
+                    # File already gone (races with a concurrent cleanup); OK.
                     pass
                 except Exception as e:
                     log.warning(f"Failed to remove {fpath}: {e}")

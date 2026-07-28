@@ -7,6 +7,7 @@ in the same log.
 """
 
 import os
+import sys
 import time
 import requests
 import csv
@@ -55,12 +56,9 @@ try:
         auth_key = f.read().strip()
 except Exception as e:
     logger.error(f"Failed to read access key from /app/config/access_key.txt: {e}")
-    exit(1)
+    sys.exit(1)
 
 metrics_backlog_file = "/app/static/data/metrics_backlog.jsonl"
-
-sys_path = os.getenv("SYS_PATH", "/sys")
-proc_path = os.getenv("PROC_PATH", "/proc")
 
 # Generate Unique ID
 try:
@@ -68,7 +66,7 @@ try:
     logger.info(f"Generated unique_id: {unique_id}")
 except Exception:
     logger.critical("Cannot proceed without a valid unique_id.")
-    exit(1)
+    sys.exit(1)
 
 # VE.Direct (Solar). Use a Victron-specific by-id symlink so this never grabs
 # the XBee FTDI adapter. When the VE.Direct cable isn't plugged in, the symlink
@@ -365,7 +363,9 @@ def remove_records_from_csv(image_name):
         logger.error(f"CSV update failed: {e}")
         try:
             os.remove(tmp)
-        except Exception:
+        except OSError:
+            # Best-effort cleanup of the temp file — it may already be gone
+            # (e.g. the initial write failed) or unremovable; nothing to do here.
             pass
 
 def process_and_upload_images():
@@ -416,6 +416,7 @@ def process_and_upload_images():
             os.remove(side_path)
             logger.info(f"Deleted sidecar: {side_path}")
         except FileNotFoundError:
+            # Sidecar is optional; nothing to remove if it was never written.
             pass
         except Exception as e:
             logger.error(f"Failed to delete sidecar {side_path}: {e}")

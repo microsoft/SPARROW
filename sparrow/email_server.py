@@ -107,6 +107,7 @@ if __name__ == "__main__":
     try:
         asyncio.get_event_loop().run_forever()
     except KeyboardInterrupt:
+        # Graceful shutdown on Ctrl+C; the finally block stops the controller.
         pass
     finally:
         controller.stop()

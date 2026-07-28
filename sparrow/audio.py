@@ -765,7 +765,8 @@ def monitor_audio():
     finally:
         try:
             os.remove(temp_file)
-        except Exception:
+        except OSError:
+            # Temp file may already be gone or unremovable; nothing to do.
             pass
 
 

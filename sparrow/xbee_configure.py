@@ -79,7 +79,8 @@ def configure_xbee(
             try:
                 if ser:
                     ser.close()
-            except Exception:
+            except (serial.SerialException, OSError):
+                # Port is already unhealthy; drop it and keep probing.
                 pass
             ser = None
 
