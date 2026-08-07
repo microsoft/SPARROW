@@ -161,12 +161,17 @@ def configure_xbee(
         print(f"[WARN] Re-opened at {final_baud} but couldn't re-enter command mode. "
               "This can happen if timing is off; API mode may still be set correctly.")
     else:
-        # Read back key params
+        # Read back key params. Skip BR on 900-family to avoid printing a
+        # scary-looking BR=ERROR that just reflects the fact BR isn't a
+        # valid AT command on that family (RF rate is fixed by firmware).
         ap = at(ser2, "AP", expect_ok=False)
-        br = at(ser2, "BR", expect_ok=False)
         ce = at(ser2, "CE", expect_ok=False)
         bd = at(ser2, "BD", expect_ok=False)
-        print(f"[VERIFY] AP={ap.strip()} BR={br.strip()} CE={ce.strip()} BD={bd.strip()}")
+        if family == "900":
+            print(f"[VERIFY] AP={ap.strip()} BR=n/a(firmware-fixed) CE={ce.strip()} BD={bd.strip()}")
+        else:
+            br = at(ser2, "BR", expect_ok=False)
+            print(f"[VERIFY] AP={ap.strip()} BR={br.strip()} CE={ce.strip()} BD={bd.strip()}")
         at(ser2, "CN", expect_ok=False)
     ser2.close()
 
