@@ -96,6 +96,7 @@ AUDIO_BIRDS_MODEL_FILENAME_FINAL="model.onnx"
 REPO_URL="https://github.com/microsoft/SPARROW.git"
 CLONE_DIR=""
 USE_ROBIN=false
+XBEE_FAMILY="${XBEE_FAMILY:-}"
 
 ONBOARDING_URL="https://server.sparrowstudio.azure.com/v1/onboarding"
 EMAIL=""
@@ -118,9 +119,31 @@ command_exists() { command -v "$1" >/dev/null 2>&1; }
 install_uuidgen() {
     if command_exists uuidgen; then
         log "uuidgen already installed."
+        return 0
+    fi
+
+    mkdir -p /run/uuidd && chmod 755 /run/uuidd
+    apt-get update -y || log "WARN: apt-get update failed; continuing with cached indexes."
+
+    # /usr/bin/uuidgen ships in the uuid-runtime binary package on every
+    # current Debian release (Bookworm and Trixie both build it from the
+    # util-linux source; util-linux itself does NOT ship uuidgen).
+    # Guard the install so set -e doesn't abort before we can log a
+    # diagnostic that actually helps the operator.
+    if apt-get install -y uuid-runtime; then
+        log "Installed uuid-runtime."
     else
-        mkdir -p /run/uuidd && chmod 755 /run/uuidd
-        apt-get update -y && apt-get install -y uuid-runtime
+        log "ERROR: 'apt install uuid-runtime' failed."
+        log "       On Debian, /usr/bin/uuidgen is shipped by the uuid-runtime package."
+        log "       If apt reported 'no installation candidate', /etc/apt/sources.list"
+        log "       is likely missing the 'main' component, or set to the wrong suite."
+        log "       Expected entry for Trixie:"
+        log "         deb http://deb.debian.org/debian $(lsb_release -sc 2>/dev/null || echo trixie) main"
+        log "       Fix sources.list, run 'sudo apt-get update', then re-run this script."
+    fi
+
+    if ! command_exists uuidgen; then
+        return 1
     fi
 }
 
@@ -453,16 +476,40 @@ detect_xbee_port() {
     echo "$port"
 }
 
+prompt_xbee_family() {
+    # Honor an env override so headless / repeat runs skip the prompt.
+    case "${XBEE_FAMILY:-}" in
+        868|900)
+            log "XBEE_FAMILY=$XBEE_FAMILY (from env)"
+            return 0
+            ;;
+        "") : ;;
+        *)
+            log "WARN: XBEE_FAMILY='$XBEE_FAMILY' is invalid; falling back to prompt."
+            ;;
+    esac
+
+    if _yesno "Is the XBee radio an XBee-PRO 900 (rather than the default XBee SX 868)?"; then
+        XBEE_FAMILY=900
+    else
+        XBEE_FAMILY=868
+    fi
+    export XBEE_FAMILY
+    log "XBEE_FAMILY=$XBEE_FAMILY"
+}
+
 run_xbee_configure_if_needed() {
     [[ "${USE_ROBIN:-false}" == "true" ]] || {
         log "ROBIN not in use; skipping xbee_configure.py"
         return 0
     }
 
+    prompt_xbee_family
+
     local xbee_port
     xbee_port="$(detect_xbee_port)" || exit 1
 
-    log "Running xbee_configure.py for ROBIN on port $xbee_port..."
+    log "Running xbee_configure.py for ROBIN on port $xbee_port (family=${XBEE_FAMILY:-868})..."
     (
         cd "$SYSTEM_FOLDER/sparrow"
         python xbee_configure.py \
@@ -472,7 +519,8 @@ run_xbee_configure_if_needed() {
           --rf 1 \
           --router 0 \
           --netid 1234 \
-          --node SPARROW_MASTER
+          --node SPARROW_MASTER \
+          --family "${XBEE_FAMILY:-868}"
     )
 }
 

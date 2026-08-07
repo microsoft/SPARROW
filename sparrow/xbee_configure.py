@@ -64,6 +64,7 @@ def configure_xbee(
     router_mode: int,
     network_id_hex: str | None,
     node_id: str | None,
+    family: str = "868",
 ):
     # 1) Probe to find current baud that allows +++
     ser = None
@@ -101,9 +102,16 @@ def configure_xbee(
     print(f"Setting CE={router_mode} (routing/messaging mode) ...")
     at(ser, f"CE{router_mode}")
 
-    # RF data rate: BR=1 for 80kbps (all nodes must match)
-    print(f"Setting BR={rf_rate} (RF data rate) ...")
-    at(ser, f"BR{rf_rate}")
+    # RF data rate: BR=1 for 80kbps (all nodes must match).
+    # BR is only a valid AT command on the XBee SX 868 family. On the
+    # XBee-PRO 900 / 900HP families the RF rate is fixed by the firmware
+    # image loaded on the module (Digi ships separate 10kbps / 200kbps
+    # firmware builds), so AT BR returns ERROR — skip the command entirely.
+    if family == "900":
+        print("Skipping BR: RF rate is fixed by firmware on XBee-PRO 900 family.")
+    else:
+        print(f"Setting BR={rf_rate} (RF data rate) ...")
+        at(ser, f"BR{rf_rate}")
 
     # Optional Network ID (hex). Example: 1234
     if network_id_hex:
@@ -153,12 +161,17 @@ def configure_xbee(
         print(f"[WARN] Re-opened at {final_baud} but couldn't re-enter command mode. "
               "This can happen if timing is off; API mode may still be set correctly.")
     else:
-        # Read back key params
+        # Read back key params. Skip BR on 900-family to avoid printing a
+        # scary-looking BR=ERROR that just reflects the fact BR isn't a
+        # valid AT command on that family (RF rate is fixed by firmware).
         ap = at(ser2, "AP", expect_ok=False)
-        br = at(ser2, "BR", expect_ok=False)
         ce = at(ser2, "CE", expect_ok=False)
         bd = at(ser2, "BD", expect_ok=False)
-        print(f"[VERIFY] AP={ap.strip()} BR={br.strip()} CE={ce.strip()} BD={bd.strip()}")
+        if family == "900":
+            print(f"[VERIFY] AP={ap.strip()} BR=n/a(firmware-fixed) CE={ce.strip()} BD={bd.strip()}")
+        else:
+            br = at(ser2, "BR", expect_ok=False)
+            print(f"[VERIFY] AP={ap.strip()} BR={br.strip()} CE={ce.strip()} BD={bd.strip()}")
         at(ser2, "CN", expect_ok=False)
     ser2.close()
 
@@ -176,6 +189,10 @@ def main():
                    help="CE routing/messaging mode (0=standard router)")
     p.add_argument("--netid", default=None, help="Network ID (hex), e.g. 1234 or 0x1234")
     p.add_argument("--node", default=None, help="Node identifier (NI), e.g. SPARROW_GATEWAY")
+    p.add_argument("--family", choices=["868", "900"], default="868",
+                   help="XBee module family. '868' (default) = XBee SX 868. "
+                        "'900' = XBee-PRO 900 / 900HP; skips the BR command since "
+                        "RF rate on that family is fixed by the loaded firmware image.")
     args = p.parse_args()
 
     probe = args.probe_baud[:] if args.probe_baud else DEFAULT_PROBE_BAUDS
@@ -189,6 +206,7 @@ def main():
         router_mode=args.router,
         network_id_hex=args.netid,
         node_id=args.node,
+        family=args.family,
     )
     print("[DONE] Configuration complete.")
 
