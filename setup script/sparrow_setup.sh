@@ -11,6 +11,13 @@
 set -euo pipefail
 export GTK_A11Y=none
 
+# Survive SSH session drops (e.g. Pi Connect terminal glitches, network blips):
+# ignore SIGHUP so the parent shell dying doesn't kill this script mid-install,
+# and ignore SIGPIPE so a write to a dead terminal doesn't take us down either.
+# Without this, a session drop during a slow apt step (docker-ce download on
+# a poor field link is minutes long) silently aborts setup with no error log.
+trap '' HUP PIPE
+
 ###############################################################################
 # 0.  -- GUI HELPERS --
 ###############################################################################
