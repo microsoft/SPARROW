@@ -29,9 +29,14 @@ SERIAL_LOCK = "/tmp/vedirect.lock"
 
 os.makedirs(CONFIG_DIR, exist_ok=True)
 
-# Default Configuration
+# Default Configuration. PORT is intentionally deployment-specific and NOT
+# a good candidate for a hardcoded default: on Pi 5 builds without a Victron
+# cable, /dev/ttyUSB0 is often the XBee's FTDI, and opening it here starts a
+# race with xbee_master_collect.py that costs both processes ~90% of their
+# incoming frames. The setup script writes the correct Victron by-id path
+# into VE_DIRECT_PORT when it detects a cable — read that here.
 DEFAULTS = {
-    "PORT": "/dev/ttyUSB0",
+    "PORT": os.environ.get("VE_DIRECT_PORT", "/dev/ttyUSB0"),
     "BAUDRATE": 19200,
     "FLOAT_VOLTAGE": 26.8,
     "ABSORPTION_VOLTAGE": 27.2,
@@ -51,6 +56,13 @@ def load_config():
                 data = json.load(f)
         merged = DEFAULTS.copy()
         merged.update({k: data.get(k, DEFAULTS[k]) for k in DEFAULTS})
+        # VE_DIRECT_PORT is deployment-specific — always let the env var win
+        # over whatever port was previously written into the JSON. Otherwise
+        # an old JSON keeps pinning us at /dev/ttyUSB0 even after the setup
+        # script writes the correct Victron by-id path into the env.
+        env_port = os.environ.get("VE_DIRECT_PORT")
+        if env_port:
+            merged["PORT"] = env_port
         return merged
     except Timeout:
         logger.warning("Timeout acquiring config lock; using defaults.")
