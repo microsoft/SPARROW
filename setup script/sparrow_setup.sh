@@ -11,6 +11,13 @@
 set -euo pipefail
 export GTK_A11Y=none
 
+# Survive SSH session drops (e.g. Pi Connect terminal glitches, network blips):
+# ignore SIGHUP so the parent shell dying doesn't kill this script mid-install,
+# and ignore SIGPIPE so a write to a dead terminal doesn't take us down either.
+# Without this, a session drop during a slow apt step (docker-ce download on
+# a poor field link is minutes long) silently aborts setup with no error log.
+trap '' HUP PIPE
+
 ###############################################################################
 # 0.  -- GUI HELPERS --
 ###############################################################################
@@ -234,6 +241,17 @@ install_network_manager() {
     systemctl enable --now NetworkManager
 }
 
+# Some fresh Trixie installs ship with wifi soft-blocked (rfkill) or with
+# `nmcli radio wifi` off — either state makes the hotspot setup on line 813
+# fail with a confusing NetworkManager error and no clear signal to the
+# operator. Toggle both on unconditionally; both are idempotent when wifi
+# is already enabled.
+enable_wifi_radio() {
+    log "Ensuring Wi-Fi radio is enabled..."
+    rfkill unblock wifi 2>/dev/null || true
+    nmcli radio wifi on 2>/dev/null || true
+}
+
 ###############################################################################
 # I2C enablement
 ###############################################################################
@@ -381,7 +399,7 @@ setup_persistent_wifi_hotspot() {
 # Models + repo
 ###############################################################################
 download_model() {
-    local dir="$SYSTEM_FOLDER/Models/megadetectorv6/$MODEL_DIR_NAME"
+    local dir="$SYSTEM_FOLDER/Models/tritonserver/model_repository/megadetectorv6/$MODEL_DIR_NAME"
     local tmp="$dir/$MODEL_FILENAME_TEMP" fin="$dir/$MODEL_FILENAME_FINAL"
     mkdir -p "$dir"
     while true; do
@@ -394,7 +412,7 @@ download_model() {
 }
 
 download_model_ai4g() {
-    local dir="$SYSTEM_FOLDER/Models/AI4GAmazonClassification/$AI4G_MODEL_DIR_NAME"
+    local dir="$SYSTEM_FOLDER/Models/tritonserver/model_repository/AI4GAmazonClassification/$AI4G_MODEL_DIR_NAME"
     local tmp="$dir/$AI4G_MODEL_FILENAME_TEMP" fin="$dir/$AI4G_MODEL_FILENAME_FINAL"
     mkdir -p "$dir"
     while true; do
@@ -407,7 +425,7 @@ download_model_ai4g() {
 }
 
 download_model_audio_birds() {
-    local dir="$SYSTEM_FOLDER/Models/megadetector_birds_v1/$AUDIO_BIRDS_MODEL_DIR_NAME"
+    local dir="$SYSTEM_FOLDER/Models/tritonserver/model_repository/megadetector_birds_v1/$AUDIO_BIRDS_MODEL_DIR_NAME"
     local tmp="$dir/$AUDIO_BIRDS_MODEL_FILENAME_TEMP" fin="$dir/$AUDIO_BIRDS_MODEL_FILENAME_FINAL"
     mkdir -p "$dir"
     while true; do
@@ -588,9 +606,9 @@ create_folders() {
     uh=$(eval echo ~"${SUDO_USER:-$USER}")
     SYSTEM_FOLDER="$uh/Desktop/system"
 
-    mkdir -p "$SYSTEM_FOLDER/Models/megadetectorv6/$MODEL_DIR_NAME"
-    mkdir -p "$SYSTEM_FOLDER/Models/AI4GAmazonClassification/$AI4G_MODEL_DIR_NAME"
-    mkdir -p "$SYSTEM_FOLDER/Models/megadetector_birds_v1/$AUDIO_BIRDS_MODEL_DIR_NAME"
+    mkdir -p "$SYSTEM_FOLDER/Models/tritonserver/model_repository/megadetectorv6/$MODEL_DIR_NAME"
+    mkdir -p "$SYSTEM_FOLDER/Models/tritonserver/model_repository/AI4GAmazonClassification/$AI4G_MODEL_DIR_NAME"
+    mkdir -p "$SYSTEM_FOLDER/Models/tritonserver/model_repository/megadetector_birds_v1/$AUDIO_BIRDS_MODEL_DIR_NAME"
 
     CLONE_DIR="$SYSTEM_FOLDER"
 
@@ -809,6 +827,7 @@ else
     _progress "Installing Docker Engine + Compose..." install_docker_pi_debian
 fi
 
+enable_wifi_radio
 prompt_hotspot_password
 setup_persistent_wifi_hotspot
 
