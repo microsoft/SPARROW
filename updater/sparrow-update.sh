@@ -118,8 +118,21 @@ require_tool jq
 require_tool tar
 require_tool rsync
 require_tool sha256sum
-require_tool docker-compose
 require_tool docker
+
+# Docker Compose invocation. The setup script installs the v2 plugin (invoked
+# as `docker compose`) and explicitly `apt-get remove`s the legacy v1 binary
+# (`docker-compose`), so a strict `require_tool docker-compose` would kill the
+# updater on every freshly-set-up Pi. Some older nodes still carry the v1
+# binary from pre-migration installs — accept either shape and pick whichever
+# is available at runtime. Fail only if the Pi has neither.
+if docker compose version >/dev/null 2>&1; then
+    dc() { docker compose "$@"; }
+elif command -v docker-compose >/dev/null 2>&1; then
+    dc() { docker-compose "$@"; }
+else
+    die "neither 'docker compose' (v2 plugin) nor 'docker-compose' (v1) is available"
+fi
 
 read_current_tag() {
     [[ -f "$CURRENT_TAG_FILE" ]] && cat "$CURRENT_TAG_FILE" || echo ""
@@ -193,8 +206,8 @@ verify_tarball() {
 # relative to the project dir), so we just check YAML + Compose schema by piping.
 validate_compose() {
     local dir="$1"
-    ( cd "$dir" && docker-compose -f docker-compose.yml config >/dev/null ) \
-        || die "docker-compose config validation failed in $dir"
+    ( cd "$dir" && dc -f docker-compose.yml config >/dev/null ) \
+        || die "compose config validation failed in $dir"
 }
 
 snapshot_to_backup() {
@@ -220,13 +233,13 @@ restore_backup() {
 }
 
 compose_build() {
-    ( cd "$DEPLOY_DIR" && docker-compose build 2>&1 | tail -20 | sed 's/^/    | /' ) \
+    ( cd "$DEPLOY_DIR" && dc build 2>&1 | tail -20 | sed 's/^/    | /' ) \
         || return 1
     return 0
 }
 
 compose_recreate() {
-    ( cd "$DEPLOY_DIR" && docker-compose up -d --force-recreate 2>&1 | tail -10 | sed 's/^/    | /' ) \
+    ( cd "$DEPLOY_DIR" && dc up -d --force-recreate 2>&1 | tail -10 | sed 's/^/    | /' ) \
         || return 1
     return 0
 }
@@ -381,7 +394,7 @@ log INFO "applied $new_tag to $DEPLOY_DIR"
 
 # 11. Build
 if ! compose_build; then
-    log ERROR "docker-compose build failed for $new_tag"
+    log ERROR "compose build failed for $new_tag"
     rollback "$backup_tag" "build failed"
     exit 0
 fi
