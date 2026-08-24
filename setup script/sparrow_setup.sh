@@ -48,8 +48,15 @@ _input() {
         zenity "${opts[@]}"
     else
         if [[ "${2:-}" == "hide" ]]; then
+            # `read -s` swallows the newline the user types, leaving the cursor
+            # on the prompt line. Send a cosmetic newline to the terminal (stderr,
+            # NOT stdout) so command substitution captures ONLY the password.
+            # Without >&2 the newline lands in stdout and every caller of
+            # `_input "…" hide` gets $'\n<value>' — which then breaks
+            # set_dotenv_kv's sed expression and stores a password with a leading
+            # newline into sparrow.env.
             read -rsp "$1: " _txt
-            echo
+            echo >&2
             echo "$_txt"
         else
             read -rp "$1: " _txt
@@ -402,6 +409,14 @@ download_model() {
     local dir="$SYSTEM_FOLDER/Models/tritonserver/model_repository/megadetectorv6/$MODEL_DIR_NAME"
     local tmp="$dir/$MODEL_FILENAME_TEMP" fin="$dir/$MODEL_FILENAME_FINAL"
     mkdir -p "$dir"
+    # Skip if already downloaded. The Zenodo record URL is pinned to a specific
+    # version, so re-downloads are byte-identical — pure bandwidth/time waste.
+    # Fresh model versions arrive via server-pushed /model_update, not here.
+    # To force a refresh, delete "$fin" before re-running setup.
+    if [[ -f "$fin" ]]; then
+        log "Megadetector v6 already present at $fin — skipping download"
+        return 0
+    fi
     while true; do
         if _progress "Downloading Megadetector v6..." wget -q -O "$tmp" "$MODEL_DOWNLOAD_URL"; then
             mv "$tmp" "$fin"
@@ -415,6 +430,10 @@ download_model_ai4g() {
     local dir="$SYSTEM_FOLDER/Models/tritonserver/model_repository/AI4GAmazonClassification/$AI4G_MODEL_DIR_NAME"
     local tmp="$dir/$AI4G_MODEL_FILENAME_TEMP" fin="$dir/$AI4G_MODEL_FILENAME_FINAL"
     mkdir -p "$dir"
+    if [[ -f "$fin" ]]; then
+        log "AI4G Amazon Classification model already present at $fin — skipping download"
+        return 0
+    fi
     while true; do
         if _progress "Downloading AI4G model..." wget -q -O "$tmp" "$AI4G_MODEL_DOWNLOAD_URL"; then
             mv "$tmp" "$fin"
@@ -428,6 +447,10 @@ download_model_audio_birds() {
     local dir="$SYSTEM_FOLDER/Models/tritonserver/model_repository/megadetector_birds_v1/$AUDIO_BIRDS_MODEL_DIR_NAME"
     local tmp="$dir/$AUDIO_BIRDS_MODEL_FILENAME_TEMP" fin="$dir/$AUDIO_BIRDS_MODEL_FILENAME_FINAL"
     mkdir -p "$dir"
+    if [[ -f "$fin" ]]; then
+        log "MD Audio Birds v1 already present at $fin — skipping download"
+        return 0
+    fi
     while true; do
         if _progress "Downloading MD Audio Birds v1..." wget -q -O "$tmp" "$AUDIO_BIRDS_MODEL_DOWNLOAD_URL"; then
             mv "$tmp" "$fin"
@@ -470,24 +493,23 @@ prompt_robin_usage() {
 detect_xbee_port() {
     local port=""
 
+    # The XBee radio talks to the Pi through an FTDI-based USB serial adapter.
+    # Filter to `usb-FTDI_*` explicitly: an unfiltered `by-id/*` glob picks up
+    # whatever sorts first alphabetically (Adafruit debug cable, GPS dongle,
+    # a Victron VE.Direct cable on a Starlink node, etc.) and hands it to
+    # xbee_configure.py, which then tries to speak XBee AT to a device that
+    # doesn't understand and either times out or misreads a garbage reply.
+    # Matches the FTDI selection used by detect_and_patch_local_devices().
     if [[ -d /dev/serial/by-id ]]; then
-        for dev in /dev/serial/by-id/*; do
+        for dev in /dev/serial/by-id/usb-FTDI_*-if00-port0; do
             [[ -e "$dev" ]] || continue
             port="$(readlink -f "$dev")"
-            [[ -n "$port" ]] && break
-        done
-    fi
-
-    if [[ -z "$port" ]]; then
-        for dev in /dev/ttyUSB* /dev/ttyACM*; do
-            [[ -e "$dev" ]] || continue
-            port="$dev"
             break
         done
     fi
 
     if [[ -z "$port" ]]; then
-        _error "Could not auto-detect XBee serial device."
+        _error "Could not auto-detect an FTDI XBee adapter under /dev/serial/by-id/. Is the XBee radio plugged in?"
         return 1
     fi
 
@@ -571,8 +593,14 @@ detect_and_patch_local_devices() {
             # mapping, re-enable it now that an adapter is present. Idempotent: no-op if
             # the line is already uncommented.
             if grep -qE '^[[:space:]]*#[[:space:]]*-[[:space:]]*/dev/serial/by-id/usb-FTDI_.*:/dev/xbee_serial[[:space:]]*$' "$compose_file"; then
-                log "Re-enabling previously-disabled XBee device mapping"
+                log "Re-enabling previously-disabled XBee device mapping (child + 'devices:' header)"
                 sed -i.bak -E 's|^([[:space:]]*)#[[:space:]]*-[[:space:]]*(/dev/serial/by-id/usb-FTDI_[^:[:space:]]+:/dev/xbee_serial)[[:space:]]*$|\1- \2|' "$compose_file"
+                # Older versions of this function only commented the child line and left the
+                # `devices:` header dangling with no children (which Compose rejects as null).
+                # A previous no-FTDI run under the current logic also comments the header, so
+                # restore it here. Only one `devices:` key exists in the sparrow compose file,
+                # so a bare match is targeted enough.
+                sed -i -E 's|^([[:space:]]*)#[[:space:]]*devices:[[:space:]]*$|\1devices:|' "$compose_file"
             fi
             if ! grep -q "$actual_ftdi" "$compose_file"; then
                 log "Patching docker-compose.yml FTDI path -> $actual_ftdi"
@@ -582,8 +610,17 @@ detect_and_patch_local_devices() {
             fi
         fi
     else
-        log "WARN: no FTDI adapter found; commenting out the XBee device mapping so containers can still start."
-        [[ -f "$compose_file" ]] && sed -i.bak -E '/^[[:space:]]*-[[:space:]]*\/dev\/serial\/by-id\/usb-FTDI_.*:\/dev\/xbee_serial[[:space:]]*$/s/^([[:space:]]*)-/\1# -/' "$compose_file"
+        log "WARN: no FTDI adapter found; commenting out the XBee device mapping AND its 'devices:' header so containers can still start."
+        if [[ -f "$compose_file" ]]; then
+            # Comment the child FTDI line. Idempotent: won't match if already prefixed with '#'.
+            sed -i.bak -E '/^[[:space:]]*-[[:space:]]*\/dev\/serial\/by-id\/usb-FTDI_.*:\/dev\/xbee_serial[[:space:]]*$/s/^([[:space:]]*)-/\1# -/' "$compose_file"
+            # Also comment the parent `devices:` header. Without this, YAML sees an empty
+            # `devices:` key which resolves to null, and Compose rejects with something like
+            # "services.sparrow.devices must be an array" — the container never starts.
+            # Idempotent: matches only an uncommented `devices:`; a re-run finds `# devices:`
+            # and skips. Only one `devices:` header exists in the sparrow compose file.
+            sed -i -E '/^[[:space:]]*devices:[[:space:]]*$/s/^([[:space:]]*)devices:/\1# devices:/' "$compose_file"
+        fi
     fi
 
     # ---- Victron VE.Direct — patch sparrow.env + starlink.env ------------
@@ -653,14 +690,14 @@ set_dotenv_kv() {
     mkdir -p "$(dirname "$file")"
     [[ -f "$file" ]] || touch "$file"
 
-    local esc
-    esc=$(printf '%s' "$val" | sed -e 's/[\/&]/\\&/g')
-
-    if grep -qE "^${key}=" "$file"; then
-        sed -i "s/^${key}=.*/${key}=${esc}/" "$file"
-    else
-        printf '\n%s=%s\n' "$key" "$val" >>"$file"
-    fi
+    # Delete any existing KEY=... line, then append the new one literally.
+    # Building `sed -i "s/^${key}=.*/${key}=${val}/"` looks tidy but treats
+    # the value as a sed replacement pattern: newlines terminate the s///
+    # command, backslashes are interpreted as escapes, and characters like
+    # `|` corrupt any value that happens to contain them. `printf %s`
+    # writes bytes verbatim, no escaping needed.
+    sed -i "/^${key}=/d" "$file"
+    printf '%s=%s\n' "$key" "$val" >>"$file"
 }
 
 find_env_file() {
@@ -694,10 +731,17 @@ configure_ftp_pass_in_env() {
 }
 
 configure_access_key() {
+    # The prompt asks for the per-device Onboarding Key (dashboard: Pending
+    # onboarding keys -> Generate device key), NOT the project-wide dashboard
+    # access key. The two are easy to mix up because both are opaque strings
+    # from the same dashboard; the old "Sparrow Access Key" wording led at
+    # least one operator to paste the wrong one and get a 401 from /onboarding
+    # that looked like a server problem. The file it's written to keeps its
+    # legacy name (access_key.txt) so downstream Python doesn't need changing.
     local k1 k2
     while true; do
-        k1=$(_input "Enter Sparrow Access Key" hide)
-        k2=$(_input "Re-enter Sparrow Access Key" hide)
+        k1=$(_input "Enter Sparrow Onboarding Key (from dashboard: Pending onboarding keys -> Generate device key)" hide)
+        k2=$(_input "Re-enter Sparrow Onboarding Key" hide)
         [[ "$k1" == "$k2" ]] && break
         _error "Keys do not match - try again."
     done
