@@ -109,7 +109,7 @@ AUDIO_BIRDS_MODEL_FILENAME_FINAL="model.onnx"
 
 REPO_URL="https://github.com/microsoft/SPARROW.git"
 CLONE_DIR=""
-USE_ROBIN=false
+USE_SPARROW_MINI=false
 XBEE_FAMILY="${XBEE_FAMILY:-}"
 
 ONBOARDING_URL="https://server.sparrowstudio.azure.com/v1/onboarding"
@@ -482,11 +482,11 @@ clone_repo() {
     create_additional_directories
 }
 
-prompt_robin_usage() {
-    if _yesno "Is ROBIN being used?"; then
-        USE_ROBIN=true
+prompt_sparrow_mini_usage() {
+    if _yesno "Is SPARROW Mini being used?"; then
+        USE_SPARROW_MINI=true
     else
-        USE_ROBIN=false
+        USE_SPARROW_MINI=false
     fi
 }
 
@@ -539,8 +539,8 @@ prompt_xbee_family() {
 }
 
 run_xbee_configure_if_needed() {
-    [[ "${USE_ROBIN:-false}" == "true" ]] || {
-        log "ROBIN not in use; skipping xbee_configure.py"
+    [[ "${USE_SPARROW_MINI:-false}" == "true" ]] || {
+        log "SPARROW Mini not in use; skipping xbee_configure.py"
         return 0
     }
 
@@ -549,7 +549,7 @@ run_xbee_configure_if_needed() {
     local xbee_port
     xbee_port="$(detect_xbee_port)" || exit 1
 
-    log "Running xbee_configure.py for ROBIN on port $xbee_port (family=${XBEE_FAMILY:-868})..."
+    log "Running xbee_configure.py for SPARROW Mini on port $xbee_port (family=${XBEE_FAMILY:-868})..."
     (
         cd "$SYSTEM_FOLDER/sparrow"
         python xbee_configure.py \
@@ -653,7 +653,7 @@ create_folders() {
     download_model_ai4g
     download_model_audio_birds
     clone_repo
-    prompt_robin_usage
+    prompt_sparrow_mini_usage
     run_xbee_configure_if_needed
 }
 

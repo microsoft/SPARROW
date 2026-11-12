@@ -419,3 +419,7 @@ FodyWeavers.xsd
 
 # MacOS
 .DS_Store
+# Claude Code (local only)
+CLAUDE.md
+CLAUDE.local.md
+.claude/

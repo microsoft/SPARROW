@@ -223,15 +223,15 @@ Creates `~/Desktop/system` with:
 ### 4️⃣ Models
 Downloads three default ONNX models from Zenodo into `Models/tritonserver/model_repository/<model_name>/1/model.onnx`. The `tritonserver/` directory name is vestigial — inference is ONNXRuntime-only — but the path layout is what `LOCAL_MODELS_DIR` and `inference.py` expect.
 
-### 🔧 XBee Radio Config (ROBIN deployments only)
-If you answer **yes** to "Is ROBIN being used?", the script auto-detects the FTDI XBee adapter on `/dev/serial/by-id/` and runs `xbee_configure.py` once over AT command mode, writing these settings to the radio's flash (persistent across reboots):
+### 🔧 XBee Radio Config (SPARROW Mini deployments only)
+If you answer **yes** to "Is SPARROW Mini being used?", the script auto-detects the FTDI XBee adapter on `/dev/serial/by-id/` and runs `xbee_configure.py` once over AT command mode, writing these settings to the radio's flash (persistent across reboots):
 
 | AT Register | Value | Purpose |
 |---|---|---|
 | `AP` | `1` | API mode (no escapes) — required for the framed protocol `xbee_master_collect.py` uses at runtime |
 | `CE` | `0` | Standard router — routes packets in the mesh |
 | `BR` | `1` | RF data rate 80 kbps — must match remote nodes |
-| `ID` | `1234` | Network ID — must match remote nodes (robins, camera nodes) |
+| `ID` | `1234` | Network ID — must match remote nodes (SPARROW Mini, camera nodes) |
 | `NI` | `SPARROW_MASTER` | Node identifier |
 | `BD` | `7` | UART baud 115200 |
 
