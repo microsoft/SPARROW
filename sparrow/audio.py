@@ -7,7 +7,9 @@ slices clips into overlapping windows, generates mel-spectrograms,
 and sends batches to a local ONNX model for inference.
 
 Window scores are aggregated to per-second and audio-level results;
-recordings with confidence -> SUMMARY_THRESHOLD are kept and appended to
+recordings with confidence >= SUMMARY_THRESHOLD are kept in /app/recordings/
+with a <name>.json sidecar (audio_name, label e.g. "bird", model, confidence, detected_at)
+that rest_client.py sends as upload metadata, and appended to
 /app/static/data/audio_detections.csv.
 
 Settings are loaded from /app/config/audio_settings.json and periodically refreshed
@@ -92,6 +94,19 @@ N_MELS = 224
 TOP_DB = 80.0
 
 SELECTED_MODEL = DEFAULT_CONFIG["selected_model"]
+
+# What a positive result from each audio model means. The audio models are
+# binary presence detectors, so this is the label sent to the server for a kept
+# recording. A "detection_label" key in audio_settings.json (from the server)
+# overrides this; unknown models fall back to their own name.
+AUDIO_MODEL_LABELS = {
+    "megadetector_birds_v1": "bird",
+}
+DETECTION_LABEL_OVERRIDE = None
+
+
+def detection_label() -> str:
+    return DETECTION_LABEL_OVERRIDE or AUDIO_MODEL_LABELS.get(SELECTED_MODEL, SELECTED_MODEL)
 
 # Audio-level summary threshold (probability)
 SUMMARY_THRESHOLD = 0.80
@@ -234,7 +249,7 @@ def detect_usb_microphone():
 # Update audio settings
 def update_audio_settings():
     global CAPTURE_SR, MONITOR_DURATION, RECORD_DURATION, THRESHOLD
-    global DEVICE, MODE, INTERVAL_SEC, DURATION_SEC, SELECTED_MODEL
+    global DEVICE, MODE, INTERVAL_SEC, DURATION_SEC, SELECTED_MODEL, DETECTION_LABEL_OVERRIDE
 
     config = load_config()
     CAPTURE_SR = int(config.get("SAMPLE_RATE", DEFAULT_CONFIG["SAMPLE_RATE"]))
@@ -242,6 +257,7 @@ def update_audio_settings():
     RECORD_DURATION = int(config.get("RECORD_DURATION", DEFAULT_CONFIG["RECORD_DURATION"]))
     THRESHOLD = int(config.get("THRESHOLD", DEFAULT_CONFIG["THRESHOLD"]))
     SELECTED_MODEL = config.get("selected_model", DEFAULT_CONFIG["selected_model"])
+    DETECTION_LABEL_OVERRIDE = (str(config.get("detection_label") or "").strip() or None)
 
     MODE = config.get("mode", "threshold")
     sched = config.get("SCHEDULE", {})
@@ -428,13 +444,13 @@ def _get_audio_onnx_session(model_name: str):
 
 
 def run_inference_onnx(
-    dataloader: DataLoader, sample_rate: int
+    dataloader: DataLoader, sample_rate: int, model_name: Optional[str] = None
 ) -> Tuple[List[str], np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Run inference via ONNXRuntime.
     Returns: (audios, starts, ends, predictions, probabilities)
     """
-    sess = _get_audio_onnx_session(SELECTED_MODEL)
+    sess = _get_audio_onnx_session(model_name or SELECTED_MODEL)
     if sess is None:
         empty_f = np.array([], dtype=np.float32)
         empty_i = np.array([], dtype=np.int32)
@@ -571,16 +587,88 @@ def write_to_csv(audio_name, detection, confidence, date):
         logger.error(f"Failed to write CSV '{CSV_PATH}': {e}")
 
 
-def log_audio_detection(audio_path: str, prob: float):
+def log_audio_detection(audio_path: str, prob: float, date_str: Optional[str] = None):
     audio_name = os.path.basename(audio_path)
     detection = True
     confidence = round(float(prob), 6)
-    date_str = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    date_str = date_str or (datetime.utcnow().isoformat(timespec="seconds") + "Z")
     write_to_csv(audio_name, detection, confidence, date_str)
 
 
+def write_audio_sidecar(audio_path: str, prob: float, date_str: str, model: str, label: str) -> Optional[str]:
+    """Write <audio_path minus ext>.json with server-ready metadata for rest_client.py.
+
+    Mirrors the image sidecar written by inference.py. Keys match what the server's
+    /audio_uploads endpoint reads from its `metadata` form field.
+    """
+    side_path = os.path.splitext(audio_path)[0] + ".json"
+    sidecar = {
+        "audio_name": os.path.basename(audio_path),
+        "label": label,
+        "model": model,
+        "confidence": round(float(prob), 6),
+        "detected_at": date_str,
+    }
+    tmp = side_path + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(sidecar, f)
+        os.replace(tmp, side_path)
+        return side_path
+    except Exception as e:
+        logger.error(f"Failed to write audio sidecar {side_path}: {e}")
+        try:
+            os.remove(tmp)
+        except OSError:
+            # Temp file may never have been created; nothing to clean up.
+            pass
+        return None
+
+
+def keep_detection(processing_file: str, prob: float, model: str, label: str) -> str:
+    """Keep a positive recording: sidecar and CSV row first, then move the WAV.
+
+    Both are written before the WAV lands in RECORDINGS_DIR, so the uploader never
+    picks up a WAV whose metadata or CSV row doesn't exist yet. If the sidecar
+    can't be written (e.g. disk full) the WAV is still kept; it uploads with the
+    CSV row's confidence/time but no label, which beats losing the recording.
+    """
+    date_str = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    ts = os.path.splitext(os.path.basename(processing_file))[0]
+    final_path = _final_recordings_path_for(ts)
+    side_path = write_audio_sidecar(final_path, prob, date_str, model, label)
+    log_audio_detection(final_path, prob, date_str)
+    dest = _keep_move_to_recordings(processing_file)
+    if dest != final_path and side_path:
+        # Move failed; don't leave an orphan sidecar in RECORDINGS_DIR.
+        try:
+            os.remove(side_path)
+        except OSError:
+            # Already gone; nothing to clean up.
+            pass
+    return dest
+
+
+def classify_and_keep(path_proc: str) -> None:
+    """Classify a recording in PROCESSING_DIR; keep it if positive, else delete it.
+
+    The model and label are snapshotted once so a settings refresh on the other
+    thread can't attribute this clip's score to a different model or class.
+    """
+    model, label = SELECTED_MODEL, detection_label()
+    detected, max_prob = classify_audio_file(path_proc, model)
+    logger.info(f"Audio summary -> detected={detected}, max_prob={max_prob:.4f}, model={model}")
+    if detected and max_prob >= SUMMARY_THRESHOLD:
+        keep_detection(path_proc, max_prob, model, label)
+    else:
+        try:
+            os.remove(path_proc)
+        except Exception as e:
+            logger.warning(f"Failed to delete {path_proc}: {e}")
+
+
 # ----------------- End-to-end classify one file -----------------
-def classify_audio_file(audio_path: str) -> Tuple[bool, float]:
+def classify_audio_file(audio_path: str, model_name: Optional[str] = None) -> Tuple[bool, float]:
     """
     Full pipeline on a single recorded file in PROCESSING_DIR:
     window -> mel (npy) -> ONNX -> per-second -> audio summary.
@@ -624,7 +712,7 @@ def classify_audio_file(audio_path: str) -> Tuple[bool, float]:
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
 
     try:
-        audios, starts, ends, predictions, probabilities = run_inference_onnx(dataloader, SAMPLE_RATE)
+        audios, starts, ends, predictions, probabilities = run_inference_onnx(dataloader, SAMPLE_RATE, model_name)
     except Exception as e:
         logger.error(f"ONNX inference failed for {audio_path}: {e}")
         return False, 0.0
@@ -774,16 +862,7 @@ def record_triggered_audio():
     try:
         path_proc = _record_to_processing(RECORD_DURATION)
         logger.info(f"Trigger recording saved (processing): {path_proc} (pipeline scoring...)")
-        detected, max_prob = classify_audio_file(path_proc)
-        logger.info(f"Audio summary > detected={detected}, max_prob={max_prob:.4f}")
-        if detected and max_prob >= SUMMARY_THRESHOLD:
-            dest = _keep_move_to_recordings(path_proc)
-            log_audio_detection(dest, max_prob)
-        else:
-            try:
-                os.remove(path_proc)
-            except Exception as e:
-                logger.warning(f"Failed to delete {path_proc}: {e}")
+        classify_and_keep(path_proc)
     except subprocess.CalledProcessError as e:
         logger.error(f"Recording failed (trigger): {e}")
     except Exception as e:
@@ -813,16 +892,7 @@ def audio_monitoring_loop():
                 logger.info(f"Scheduled recording ({DURATION_SEC}s)")
                 path_proc = _record_to_processing(DURATION_SEC)
                 logger.info(f"Scheduled recording saved (processing): {path_proc} (pipeline scoring...)")
-                detected, max_prob = classify_audio_file(path_proc)
-                logger.info(f"Audio summary -> detected={detected}, max_prob={max_prob:.4f}")
-                if detected and max_prob >= SUMMARY_THRESHOLD:
-                    dest = _keep_move_to_recordings(path_proc)
-                    log_audio_detection(dest, max_prob)
-                else:
-                    try:
-                        os.remove(path_proc)
-                    except Exception as e:
-                        logger.warning(f"Failed to delete {path_proc}: {e}")
+                classify_and_keep(path_proc)
             except subprocess.CalledProcessError as e:
                 logger.error(f"Scheduled record failed: {e}")
             except Exception as e:
