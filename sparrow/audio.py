@@ -8,7 +8,7 @@ and sends batches to a local ONNX model for inference.
 
 Window scores are aggregated to per-second and audio-level results;
 recordings with confidence >= SUMMARY_THRESHOLD are kept in /app/recordings/
-with a <name>.json sidecar (audio_name, label, model, confidence, detected_at)
+with a <name>.json sidecar (audio_name, label e.g. "bird", model, confidence, detected_at)
 that rest_client.py sends as upload metadata, and appended to
 /app/static/data/audio_detections.csv.
 
@@ -94,6 +94,19 @@ N_MELS = 224
 TOP_DB = 80.0
 
 SELECTED_MODEL = DEFAULT_CONFIG["selected_model"]
+
+# What a positive result from each audio model means. The audio models are
+# binary presence detectors, so this is the label sent to the server for a kept
+# recording. A "detection_label" key in audio_settings.json (from the server)
+# overrides this; unknown models fall back to their own name.
+AUDIO_MODEL_LABELS = {
+    "megadetector_birds_v1": "bird",
+}
+DETECTION_LABEL_OVERRIDE = None
+
+
+def detection_label() -> str:
+    return DETECTION_LABEL_OVERRIDE or AUDIO_MODEL_LABELS.get(SELECTED_MODEL, SELECTED_MODEL)
 
 # Audio-level summary threshold (probability)
 SUMMARY_THRESHOLD = 0.80
@@ -236,7 +249,7 @@ def detect_usb_microphone():
 # Update audio settings
 def update_audio_settings():
     global CAPTURE_SR, MONITOR_DURATION, RECORD_DURATION, THRESHOLD
-    global DEVICE, MODE, INTERVAL_SEC, DURATION_SEC, SELECTED_MODEL
+    global DEVICE, MODE, INTERVAL_SEC, DURATION_SEC, SELECTED_MODEL, DETECTION_LABEL_OVERRIDE
 
     config = load_config()
     CAPTURE_SR = int(config.get("SAMPLE_RATE", DEFAULT_CONFIG["SAMPLE_RATE"]))
@@ -244,6 +257,7 @@ def update_audio_settings():
     RECORD_DURATION = int(config.get("RECORD_DURATION", DEFAULT_CONFIG["RECORD_DURATION"]))
     THRESHOLD = int(config.get("THRESHOLD", DEFAULT_CONFIG["THRESHOLD"]))
     SELECTED_MODEL = config.get("selected_model", DEFAULT_CONFIG["selected_model"])
+    DETECTION_LABEL_OVERRIDE = (str(config.get("detection_label") or "").strip() or None)
 
     MODE = config.get("mode", "threshold")
     sched = config.get("SCHEDULE", {})
@@ -590,7 +604,7 @@ def write_audio_sidecar(audio_path: str, prob: float, date_str: str) -> Optional
     side_path = os.path.splitext(audio_path)[0] + ".json"
     sidecar = {
         "audio_name": os.path.basename(audio_path),
-        "label": SELECTED_MODEL,
+        "label": detection_label(),
         "model": SELECTED_MODEL,
         "confidence": round(float(prob), 6),
         "detected_at": date_str,

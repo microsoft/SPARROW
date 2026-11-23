@@ -313,6 +313,7 @@ _AUDIO_MIME_BY_EXT = {
 
 
 AUDIO_CSV_COLS = ["Audio Name", "Detection", "Confidence Score", "Date"]
+XBEE_AUDIO_LABEL = "bird"  # SPARROW Mini only relays MP3s its bird detector kept
 
 
 def _audio_csv_row(audio_name):
@@ -349,6 +350,9 @@ def _load_audio_metadata(audio_path):
             logger.warning(f"Failed to read audio sidecar {side_path}: {e}; falling back to CSV.")
 
     meta = {"audio_name": audio_name}
+    if audio_name.lower().endswith(".mp3"):
+        # MP3s only exist because SPARROW Mini's on-device bird detector fired.
+        meta["label"] = XBEE_AUDIO_LABEL
     row = _audio_csv_row(audio_name)
     if row:
         try:
