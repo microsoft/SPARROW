@@ -365,10 +365,8 @@ def _load_audio_metadata(audio_path):
     return meta
 
 
-def remove_audio_records(audio_path):
-    """Delete the audio sidecar and prune its audio_detections.csv row (under lock)."""
-    audio_name = os.path.basename(audio_path)
-
+def remove_audio_sidecar(audio_path):
+    """Delete the audio sidecar written by audio.py, if any."""
     side_path = os.path.splitext(audio_path)[0] + ".json"
     try:
         os.remove(side_path)
@@ -378,8 +376,18 @@ def remove_audio_records(audio_path):
     except Exception as e:
         logger.error(f"Failed to delete audio sidecar {side_path}: {e}")
 
+
+def prune_orphan_audio_rows():
+    """Drop audio_detections.csv rows whose recording no longer exists.
+
+    Runs after every upload pass, so rows for uploaded (deleted) WAVs go away, a
+    lock timeout is simply retried next minute, and stale rows from older builds
+    are cleaned up. audio.py appends a row while the WAV is still in processing/,
+    so files there count as present.
+    """
     if not os.path.exists(audio_csv_file):
         return
+    processing_dir = os.path.join(audio_output_dir, "processing")
     tmp = audio_csv_file + ".tmp"
     try:
         with FileLock(audio_csv_file + ".lock", timeout=10):
@@ -388,7 +396,11 @@ def remove_audio_records(audio_path):
             if not rows:
                 return
             header, body = rows[0], rows[1:]
-            kept = [r for r in body if r and r[0] != audio_name]
+            kept = [
+                r for r in body
+                if r and (os.path.exists(os.path.join(audio_output_dir, r[0]))
+                          or os.path.exists(os.path.join(processing_dir, r[0])))
+            ]
             if len(kept) == len(body):
                 return
             with open(tmp, "w", newline="") as fout:
@@ -396,10 +408,11 @@ def remove_audio_records(audio_path):
                 w.writerow(header)
                 w.writerows(kept)
             os.replace(tmp, audio_csv_file)
+        logger.info(f"Pruned {len(body) - len(kept)} audio CSV row(s) with no recording on disk.")
     except Timeout:
-        logger.warning(f"Timeout acquiring audio CSV lock; row for {audio_name} left for next run.")
+        logger.warning("Timeout acquiring audio CSV lock; will prune on the next run.")
     except Exception as e:
-        logger.error(f"Audio CSV update failed: {e}")
+        logger.error(f"Audio CSV prune failed: {e}")
         try:
             os.remove(tmp)
         except OSError:
@@ -586,7 +599,7 @@ def process_and_upload_audio():
                     ok = False
 
                 if ok:
-                    remove_audio_records(audio_path)
+                    remove_audio_sidecar(audio_path)
                     try:
                         os.remove(audio_path)
                         success_count += 1
@@ -717,6 +730,7 @@ def process_and_upload_audio_safe():
     try:
         audio_task_flag.set()
         process_and_upload_audio()
+        prune_orphan_audio_rows()
     finally:
         audio_task_flag.clear()
 

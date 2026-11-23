@@ -444,13 +444,13 @@ def _get_audio_onnx_session(model_name: str):
 
 
 def run_inference_onnx(
-    dataloader: DataLoader, sample_rate: int
+    dataloader: DataLoader, sample_rate: int, model_name: Optional[str] = None
 ) -> Tuple[List[str], np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Run inference via ONNXRuntime.
     Returns: (audios, starts, ends, predictions, probabilities)
     """
-    sess = _get_audio_onnx_session(SELECTED_MODEL)
+    sess = _get_audio_onnx_session(model_name or SELECTED_MODEL)
     if sess is None:
         empty_f = np.array([], dtype=np.float32)
         empty_i = np.array([], dtype=np.int32)
@@ -595,7 +595,7 @@ def log_audio_detection(audio_path: str, prob: float, date_str: Optional[str] = 
     write_to_csv(audio_name, detection, confidence, date_str)
 
 
-def write_audio_sidecar(audio_path: str, prob: float, date_str: str) -> Optional[str]:
+def write_audio_sidecar(audio_path: str, prob: float, date_str: str, model: str, label: str) -> Optional[str]:
     """Write <audio_path minus ext>.json with server-ready metadata for rest_client.py.
 
     Mirrors the image sidecar written by inference.py. Keys match what the server's
@@ -604,8 +604,8 @@ def write_audio_sidecar(audio_path: str, prob: float, date_str: str) -> Optional
     side_path = os.path.splitext(audio_path)[0] + ".json"
     sidecar = {
         "audio_name": os.path.basename(audio_path),
-        "label": detection_label(),
-        "model": SELECTED_MODEL,
+        "label": label,
+        "model": model,
         "confidence": round(float(prob), 6),
         "detected_at": date_str,
     }
@@ -625,16 +625,19 @@ def write_audio_sidecar(audio_path: str, prob: float, date_str: str) -> Optional
         return None
 
 
-def keep_detection(processing_file: str, prob: float) -> str:
-    """Keep a positive recording: sidecar first, then move the WAV, then log to CSV.
+def keep_detection(processing_file: str, prob: float, model: str, label: str) -> str:
+    """Keep a positive recording: sidecar and CSV row first, then move the WAV.
 
-    The sidecar is written before the WAV lands in RECORDINGS_DIR so the uploader
-    never picks up a WAV whose metadata hasn't been written yet.
+    Both are written before the WAV lands in RECORDINGS_DIR, so the uploader never
+    picks up a WAV whose metadata or CSV row doesn't exist yet. If the sidecar
+    can't be written (e.g. disk full) the WAV is still kept; it uploads with the
+    CSV row's confidence/time but no label, which beats losing the recording.
     """
     date_str = datetime.utcnow().isoformat(timespec="seconds") + "Z"
     ts = os.path.splitext(os.path.basename(processing_file))[0]
     final_path = _final_recordings_path_for(ts)
-    side_path = write_audio_sidecar(final_path, prob, date_str)
+    side_path = write_audio_sidecar(final_path, prob, date_str, model, label)
+    log_audio_detection(final_path, prob, date_str)
     dest = _keep_move_to_recordings(processing_file)
     if dest != final_path and side_path:
         # Move failed; don't leave an orphan sidecar in RECORDINGS_DIR.
@@ -643,12 +646,29 @@ def keep_detection(processing_file: str, prob: float) -> str:
         except OSError:
             # Already gone; nothing to clean up.
             pass
-    log_audio_detection(dest, prob, date_str)
     return dest
 
 
+def classify_and_keep(path_proc: str) -> None:
+    """Classify a recording in PROCESSING_DIR; keep it if positive, else delete it.
+
+    The model and label are snapshotted once so a settings refresh on the other
+    thread can't attribute this clip's score to a different model or class.
+    """
+    model, label = SELECTED_MODEL, detection_label()
+    detected, max_prob = classify_audio_file(path_proc, model)
+    logger.info(f"Audio summary -> detected={detected}, max_prob={max_prob:.4f}, model={model}")
+    if detected and max_prob >= SUMMARY_THRESHOLD:
+        keep_detection(path_proc, max_prob, model, label)
+    else:
+        try:
+            os.remove(path_proc)
+        except Exception as e:
+            logger.warning(f"Failed to delete {path_proc}: {e}")
+
+
 # ----------------- End-to-end classify one file -----------------
-def classify_audio_file(audio_path: str) -> Tuple[bool, float]:
+def classify_audio_file(audio_path: str, model_name: Optional[str] = None) -> Tuple[bool, float]:
     """
     Full pipeline on a single recorded file in PROCESSING_DIR:
     window -> mel (npy) -> ONNX -> per-second -> audio summary.
@@ -692,7 +712,7 @@ def classify_audio_file(audio_path: str) -> Tuple[bool, float]:
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
 
     try:
-        audios, starts, ends, predictions, probabilities = run_inference_onnx(dataloader, SAMPLE_RATE)
+        audios, starts, ends, predictions, probabilities = run_inference_onnx(dataloader, SAMPLE_RATE, model_name)
     except Exception as e:
         logger.error(f"ONNX inference failed for {audio_path}: {e}")
         return False, 0.0
@@ -842,15 +862,7 @@ def record_triggered_audio():
     try:
         path_proc = _record_to_processing(RECORD_DURATION)
         logger.info(f"Trigger recording saved (processing): {path_proc} (pipeline scoring...)")
-        detected, max_prob = classify_audio_file(path_proc)
-        logger.info(f"Audio summary > detected={detected}, max_prob={max_prob:.4f}")
-        if detected and max_prob >= SUMMARY_THRESHOLD:
-            keep_detection(path_proc, max_prob)
-        else:
-            try:
-                os.remove(path_proc)
-            except Exception as e:
-                logger.warning(f"Failed to delete {path_proc}: {e}")
+        classify_and_keep(path_proc)
     except subprocess.CalledProcessError as e:
         logger.error(f"Recording failed (trigger): {e}")
     except Exception as e:
@@ -880,15 +892,7 @@ def audio_monitoring_loop():
                 logger.info(f"Scheduled recording ({DURATION_SEC}s)")
                 path_proc = _record_to_processing(DURATION_SEC)
                 logger.info(f"Scheduled recording saved (processing): {path_proc} (pipeline scoring...)")
-                detected, max_prob = classify_audio_file(path_proc)
-                logger.info(f"Audio summary -> detected={detected}, max_prob={max_prob:.4f}")
-                if detected and max_prob >= SUMMARY_THRESHOLD:
-                    keep_detection(path_proc, max_prob)
-                else:
-                    try:
-                        os.remove(path_proc)
-                    except Exception as e:
-                        logger.warning(f"Failed to delete {path_proc}: {e}")
+                classify_and_keep(path_proc)
             except subprocess.CalledProcessError as e:
                 logger.error(f"Scheduled record failed: {e}")
             except Exception as e:
