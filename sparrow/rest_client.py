@@ -24,6 +24,7 @@ import socket
 from urllib.parse import urlparse
 import serial
 import io
+from filelock import FileLock, Timeout
 import utils.sensors as sensors
 from utils.sparrow_id import get_hardware_id
 
@@ -43,6 +44,7 @@ if not logger.handlers:
 image_output_dir = "/app/static/gallery/"
 audio_output_dir = "/app/recordings/"
 csv_file = "/app/static/data/detections.csv"
+audio_csv_file = "/app/static/data/audio_detections.csv"  # written by audio.py under <file>.lock
 logs_dir = "/app/logs/restclient_logs.log"
 
 SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://server.sparrowstudio.azure.com/v1").rstrip("/")
@@ -310,12 +312,103 @@ _AUDIO_MIME_BY_EXT = {
 }
 
 
-def upload_audio_file(audio_path):
-    """Upload a single audio file (.wav or .mp3); return True on success.
+AUDIO_CSV_COLS = ["Audio Name", "Detection", "Confidence Score", "Date"]
 
-    MP3s come from robin's on-device bird detector (already filtered with
-    keep_blanks=false and encoded by lameenc); WAVs come from the master's
-    own audio.py pipeline. MIME is picked from the extension.
+
+def _audio_csv_row(audio_name):
+    """Return the audio_detections.csv row for audio_name, or None."""
+    if not os.path.exists(audio_csv_file):
+        return None
+    try:
+        with FileLock(audio_csv_file + ".lock", timeout=5):
+            with open(audio_csv_file, "r", newline="", encoding="utf-8", errors="replace") as f:
+                for row in csv.DictReader(f):
+                    if (row.get("Audio Name") or "").strip() == audio_name:
+                        return row
+    except Timeout:
+        logger.warning("Timeout acquiring audio CSV lock; uploading without CSV metadata.")
+    except Exception as e:
+        logger.warning(f"Failed to read {audio_csv_file}: {e}")
+    return None
+
+
+def _load_audio_metadata(audio_path):
+    """Return server-ready metadata for an audio file.
+
+    Prefers the sidecar JSON written by audio.py; falls back to the
+    audio_detections.csv row (WAVs kept before sidecars existed); otherwise
+    just the file name (e.g. MP3s relayed over XBee, which carry no scores).
+    """
+    audio_name = os.path.basename(audio_path)
+    side_path = os.path.splitext(audio_path)[0] + ".json"
+    if os.path.isfile(side_path):
+        try:
+            with open(side_path, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to read audio sidecar {side_path}: {e}; falling back to CSV.")
+
+    meta = {"audio_name": audio_name}
+    row = _audio_csv_row(audio_name)
+    if row:
+        try:
+            meta["confidence"] = float(row.get("Confidence Score"))
+        except (TypeError, ValueError):
+            # Malformed score; send the upload without a confidence value.
+            pass
+        if (row.get("Date") or "").strip():
+            meta["detected_at"] = row["Date"].strip()
+    return meta
+
+
+def remove_audio_records(audio_path):
+    """Delete the audio sidecar and prune its audio_detections.csv row (under lock)."""
+    audio_name = os.path.basename(audio_path)
+
+    side_path = os.path.splitext(audio_path)[0] + ".json"
+    try:
+        os.remove(side_path)
+    except FileNotFoundError:
+        # Sidecar is optional (older WAVs, XBee MP3s); nothing to remove.
+        pass
+    except Exception as e:
+        logger.error(f"Failed to delete audio sidecar {side_path}: {e}")
+
+    if not os.path.exists(audio_csv_file):
+        return
+    tmp = audio_csv_file + ".tmp"
+    try:
+        with FileLock(audio_csv_file + ".lock", timeout=10):
+            with open(audio_csv_file, "r", newline="", encoding="utf-8", errors="replace") as fin:
+                rows = list(csv.reader(fin))
+            if not rows:
+                return
+            header, body = rows[0], rows[1:]
+            kept = [r for r in body if r and r[0] != audio_name]
+            if len(kept) == len(body):
+                return
+            with open(tmp, "w", newline="") as fout:
+                w = csv.writer(fout)
+                w.writerow(header)
+                w.writerows(kept)
+            os.replace(tmp, audio_csv_file)
+    except Timeout:
+        logger.warning(f"Timeout acquiring audio CSV lock; row for {audio_name} left for next run.")
+    except Exception as e:
+        logger.error(f"Audio CSV update failed: {e}")
+        try:
+            os.remove(tmp)
+        except OSError:
+            # Temp file may already be gone; nothing to do here.
+            pass
+
+
+def upload_audio_file(audio_path):
+    """Upload a single audio file (.wav or .mp3) plus its metadata; return True on success.
+
+    MP3s come from SPARROW Mini's on-device bird detector over XBee (already
+    filtered with keep_blanks=false and encoded by lameenc); WAVs come from the
+    master's own audio.py pipeline. MIME is picked from the extension.
     """
     audio_name = os.path.basename(audio_path)
     ext = os.path.splitext(audio_name)[1].lower()
@@ -325,10 +418,20 @@ def upload_audio_file(audio_path):
         logger.warning(f"Server appears offline, skipping upload for {audio_name}.")
         return False
 
+    meta = _load_audio_metadata(audio_path)
+
     try:
         with open(audio_path, "rb") as audio_file:
             files = {"file": (audio_name, audio_file, mime)}
-            data  = {"auth_key": auth_key, "unique_id": unique_id}
+            data  = {
+                "auth_key": auth_key,
+                "unique_id": unique_id,
+                "metadata": json.dumps(meta),
+            }
+            logger.info(
+                "Sending audio to server: audio=%s label=%s confidence=%s detected_at=%s",
+                audio_name, meta.get("label"), meta.get("confidence"), meta.get("detected_at"),
+            )
             response = requests.post(audio_server_url, files=files, data=data, timeout=30)
             response.raise_for_status()
     except (requests.exceptions.RequestException, OSError) as e:
@@ -479,6 +582,7 @@ def process_and_upload_audio():
                     ok = False
 
                 if ok:
+                    remove_audio_records(audio_path)
                     try:
                         os.remove(audio_path)
                         success_count += 1

@@ -7,7 +7,9 @@ slices clips into overlapping windows, generates mel-spectrograms,
 and sends batches to a local ONNX model for inference.
 
 Window scores are aggregated to per-second and audio-level results;
-recordings with confidence -> SUMMARY_THRESHOLD are kept and appended to
+recordings with confidence >= SUMMARY_THRESHOLD are kept in /app/recordings/
+with a <name>.json sidecar (audio_name, label, model, confidence, detected_at)
+that rest_client.py sends as upload metadata, and appended to
 /app/static/data/audio_detections.csv.
 
 Settings are loaded from /app/config/audio_settings.json and periodically refreshed
@@ -571,12 +573,64 @@ def write_to_csv(audio_name, detection, confidence, date):
         logger.error(f"Failed to write CSV '{CSV_PATH}': {e}")
 
 
-def log_audio_detection(audio_path: str, prob: float):
+def log_audio_detection(audio_path: str, prob: float, date_str: Optional[str] = None):
     audio_name = os.path.basename(audio_path)
     detection = True
     confidence = round(float(prob), 6)
-    date_str = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    date_str = date_str or (datetime.utcnow().isoformat(timespec="seconds") + "Z")
     write_to_csv(audio_name, detection, confidence, date_str)
+
+
+def write_audio_sidecar(audio_path: str, prob: float, date_str: str) -> Optional[str]:
+    """Write <audio_path minus ext>.json with server-ready metadata for rest_client.py.
+
+    Mirrors the image sidecar written by inference.py. Keys match what the server's
+    /audio_uploads endpoint reads from its `metadata` form field.
+    """
+    side_path = os.path.splitext(audio_path)[0] + ".json"
+    sidecar = {
+        "audio_name": os.path.basename(audio_path),
+        "label": SELECTED_MODEL,
+        "model": SELECTED_MODEL,
+        "confidence": round(float(prob), 6),
+        "detected_at": date_str,
+    }
+    tmp = side_path + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(sidecar, f)
+        os.replace(tmp, side_path)
+        return side_path
+    except Exception as e:
+        logger.error(f"Failed to write audio sidecar {side_path}: {e}")
+        try:
+            os.remove(tmp)
+        except OSError:
+            # Temp file may never have been created; nothing to clean up.
+            pass
+        return None
+
+
+def keep_detection(processing_file: str, prob: float) -> str:
+    """Keep a positive recording: sidecar first, then move the WAV, then log to CSV.
+
+    The sidecar is written before the WAV lands in RECORDINGS_DIR so the uploader
+    never picks up a WAV whose metadata hasn't been written yet.
+    """
+    date_str = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    ts = os.path.splitext(os.path.basename(processing_file))[0]
+    final_path = _final_recordings_path_for(ts)
+    side_path = write_audio_sidecar(final_path, prob, date_str)
+    dest = _keep_move_to_recordings(processing_file)
+    if dest != final_path and side_path:
+        # Move failed; don't leave an orphan sidecar in RECORDINGS_DIR.
+        try:
+            os.remove(side_path)
+        except OSError:
+            # Already gone; nothing to clean up.
+            pass
+    log_audio_detection(dest, prob, date_str)
+    return dest
 
 
 # ----------------- End-to-end classify one file -----------------
@@ -777,8 +831,7 @@ def record_triggered_audio():
         detected, max_prob = classify_audio_file(path_proc)
         logger.info(f"Audio summary > detected={detected}, max_prob={max_prob:.4f}")
         if detected and max_prob >= SUMMARY_THRESHOLD:
-            dest = _keep_move_to_recordings(path_proc)
-            log_audio_detection(dest, max_prob)
+            keep_detection(path_proc, max_prob)
         else:
             try:
                 os.remove(path_proc)
@@ -816,8 +869,7 @@ def audio_monitoring_loop():
                 detected, max_prob = classify_audio_file(path_proc)
                 logger.info(f"Audio summary -> detected={detected}, max_prob={max_prob:.4f}")
                 if detected and max_prob >= SUMMARY_THRESHOLD:
-                    dest = _keep_move_to_recordings(path_proc)
-                    log_audio_detection(dest, max_prob)
+                    keep_detection(path_proc, max_prob)
                 else:
                     try:
                         os.remove(path_proc)
